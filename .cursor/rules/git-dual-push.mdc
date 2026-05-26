@@ -1,0 +1,19 @@
+---
+description: Push git changes to both GitHub remotes when user asks to push
+alwaysApply: true
+---
+
+# Dual GitHub push
+
+This repo pushes to **two** GitHub remotes via `origin`:
+
+1. https://github.com/osmium0106/manimation.git
+2. https://github.com/Osmium-enfec/manimation-enfec.git
+
+When the user asks to push (or commit and push):
+
+1. Never commit or push secrets — confirm `platform/.env` and other ignored files are not staged.
+2. Run `git push origin main` (or current branch) — this pushes to **both** URLs configured on `origin`.
+3. Do not push to only one remote unless the user explicitly asks for a single target.
+
+Verify remotes: `git remote -v` should show two `(push)` URLs under `origin`.
