@@ -1,0 +1,26 @@
+# Three D
+
+
+---
+
+## three_d - Manim Community v0.20.1
+
+Source: https://docs.manim.community/en/stable/reference/manim.mobject.three_d.html
+
+three_d¶
+
+Three-dimensional mobjects.
+
+Modules¶
+
+polyhedra
+
+General polyhedral class and platonic solids.
+
+three_d_utils
+
+Utility functions for three-dimensional mobjects.
+
+three_dimensions
+
+Three-dimensional mobjects.

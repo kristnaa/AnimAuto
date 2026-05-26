@@ -1,0 +1,22 @@
+# Value Tracker
+
+
+---
+
+## value_tracker - Manim Community v0.20.1
+
+Source: https://docs.manim.community/en/stable/reference/manim.mobject.value_tracker.html
+
+value_tracker¶
+
+Simple mobjects that can be used for storing (and updating) a value.
+
+Classes
+
+ComplexValueTracker
+
+Tracks a complex-valued parameter.
+
+ValueTracker
+
+A mobject that can be used for tracking (real-valued) parameters.

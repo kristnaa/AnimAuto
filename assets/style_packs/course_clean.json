@@ -1,0 +1,9 @@
+{
+  "id": "course_clean",
+  "name": "Course Clean",
+  "description": "Lucide mono-white icons, procedural shapes, brand logos unc recolored",
+  "prefer_kinds": ["procedural", "brand", "iconify"],
+  "default_icon_color": "#FFFFFF",
+  "punchline_style": "iconify",
+  "exclude_style_packs": ["playful"]
+}

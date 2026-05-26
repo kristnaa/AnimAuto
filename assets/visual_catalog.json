@@ -1,0 +1,83 @@
+{
+  "python": {
+    "tags": ["programming", "language", "brand", "subject"],
+    "synonyms": ["python3", "py"],
+    "candidates": [
+      {"kind": "brand", "ref": "assets/brands/python-logo.svg", "scale": 1.2, "color": null},
+      {"kind": "iconify", "ref": "devicon:python", "scale": 1.2, "color": null},
+      {"kind": "iconify", "ref": "fa6-brands:python", "scale": 1.2, "color": null}
+    ]
+  },
+  "question": {
+    "tags": ["ask", "confused", "intro", "question"],
+    "synonyms": ["what", "why", "how", "help"],
+    "candidates": [
+      {"kind": "procedural", "ref": "shape_question", "scale": 1.0, "color": null},
+      {"kind": "iconify", "ref": "lucide:circle-help", "scale": 1.8, "color": "#FFFFFF"}
+    ]
+  },
+  "terminal": {
+    "tags": ["code", "instructions", "command", "programming", "tool"],
+    "synonyms": ["shell", "cli", "console", "write", "instructions"],
+    "candidates": [
+      {"kind": "iconify", "ref": "lucide:terminal", "scale": 1.2, "color": "#FFFFFF"},
+      {"kind": "iconify", "ref": "lucide:square-code", "scale": 1.2, "color": "#FFFFFF"}
+    ]
+  },
+  "computer": {
+    "tags": ["device", "machine", "actor", "tool"],
+    "synonyms": ["laptop", "pc", "desktop", "computer"],
+    "candidates": [
+      {"kind": "iconify", "ref": "lucide:laptop", "scale": 1.2, "color": "#FFFFFF"},
+      {"kind": "iconify", "ref": "lucide:monitor", "scale": 1.2, "color": "#FFFFFF"}
+    ]
+  },
+  "frustration": {
+    "tags": ["joke", "punchline", "error", "scream", "emotion"],
+    "synonyms": ["scream", "screaming", "angry", "frustrated", "panic"],
+    "candidates": [
+      {"kind": "iconify", "ref": "lucide:volume-2", "scale": 1.2, "color": "#FFFFFF", "style_pack": "course_clean"},
+      {"kind": "iconify", "ref": "noto:face-screaming-in-fear", "scale": 1.2, "color": null, "style_pack": "playful"},
+      {"kind": "iconify", "ref": "twemoji:face-screaming-in-fear", "scale": 1.2, "color": null, "style_pack": "playful"}
+    ]
+  },
+  "success": {
+    "tags": ["done", "complete", "check", "positive"],
+    "synonyms": ["works", "success", "correct", "yes"],
+    "candidates": [
+      {"kind": "iconify", "ref": "lucide:circle-check", "scale": 1.2, "color": "#FFFFFF"},
+      {"kind": "iconify", "ref": "lucide:check", "scale": 1.2, "color": "#FFFFFF"}
+    ]
+  },
+  "failure": {
+    "tags": ["joke", "punchline", "error", "usually"],
+    "synonyms": ["usually", "sometimes", "bug", "broken", "fail"],
+    "candidates": [
+      {"kind": "iconify", "ref": "lucide:bug", "scale": 1.2, "color": "#FFFFFF"},
+      {"kind": "iconify", "ref": "lucide:monitor-x", "scale": 1.2, "color": "#FFFFFF"}
+    ]
+  },
+  "ai": {
+    "tags": ["robot", "machine learning", "subject"],
+    "synonyms": ["artificial intelligence", "ml", "bot", "neural"],
+    "candidates": [
+      {"kind": "iconify", "ref": "lucide:bot", "scale": 1.2, "color": "#FFFFFF"},
+      {"kind": "iconify", "ref": "lucide:brain", "scale": 1.2, "color": "#FFFFFF"}
+    ]
+  },
+  "code": {
+    "tags": ["programming", "tool", "editor"],
+    "synonyms": ["coding", "developer", "software"],
+    "candidates": [
+      {"kind": "iconify", "ref": "lucide:square-code", "scale": 1.2, "color": "#FFFFFF"},
+      {"kind": "iconify", "ref": "lucide:code-2", "scale": 1.2, "color": "#FFFFFF"}
+    ]
+  },
+  "sparkles": {
+    "tags": ["celebration", "intro", "subject", "default"],
+    "synonyms": ["welcome", "new", "start", "magic"],
+    "candidates": [
+      {"kind": "iconify", "ref": "lucide:sparkles", "scale": 1.2, "color": "#FFFFFF"}
+    ]
+  }
+}

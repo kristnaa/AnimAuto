@@ -1,0 +1,9 @@
+{
+  "id": "playful",
+  "name": "Playful",
+  "description": "Emoji punchlines allowed, brand logos preserved",
+  "prefer_kinds": ["brand", "iconify", "procedural"],
+  "default_icon_color": "#FFFFFF",
+  "punchline_style": "emoji",
+  "exclude_style_packs": []
+}

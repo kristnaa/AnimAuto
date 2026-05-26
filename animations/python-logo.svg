@@ -1,0 +1,12 @@
+<!-- Official Python logo SVG from https://www.python.org/community/logos/ -->
+<svg xmlns="http://www.w3.org/2000/svg" width="110" height="110" viewBox="0 0 110 110">
+  <g>
+    <path d="M54.5,0c-6.6,0-12,5.4-12,12v8h24v-8C66.5,5.4,61.1,0,54.5,0z" fill="#306998"/>
+    <path d="M42.5,12v8h24v-8H42.5z" fill="#FFD43B"/>
+    <path d="M30.5,20c-6.6,0-12,5.4-12,12v16c0,6.6,5.4,12,12,12h8v-8h-8v-16h40v16h-8v8h8c6.6,0,12-5.4,12-12v-16c0-6.6-5.4-12-12-12H30.5z" fill="#FFD43B"/>
+    <circle cx="38.5" cy="28" r="4" fill="#306998"/>
+    <circle cx="70.5" cy="82" r="4" fill="#FFD43B"/>
+    <path d="M66.5,90v8c0,6.6-5.4,12-12,12s-12-5.4-12-12v-8h24z" fill="#306998"/>
+    <path d="M78.5,82c6.6,0,12-5.4,12-12v-16c0-6.6-5.4-12-12-12h-8v8h8v16h-40v-16h8v-8h-8c-6.6,0-12,5.4-12,12v16c0,6.6,5.4,12,12,12H78.5z" fill="#306998"/>
+  </g>
+</svg>

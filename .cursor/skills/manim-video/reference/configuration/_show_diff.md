@@ -1,0 +1,28 @@
+#  Show Diff
+
+
+---
+
+## _show_diff - Manim Community v0.20.1
+
+Source: https://docs.manim.community/en/stable/reference/manim.utils.testing._show_diff.html
+
+_show_diff¶
+
+Functions
+
+show_diff_helper(frame_number, frame_data, expected_frame_data, control_data_filename)[source]¶
+Will visually display with matplotlib differences between frame generated and the one expected.
+
+Parameters:
+
+frame_number (int)
+
+frame_data (PixelArray)
+
+expected_frame_data (PixelArray)
+
+control_data_filename (str)
+
+Return type:
+None

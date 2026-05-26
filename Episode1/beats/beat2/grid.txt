@@ -1,0 +1,14 @@
+─── GRID LAYOUT (text_right_icon_left) ───
+┌─────────────────────────────────────────────────────────────┐
+│  LABEL: "Big Question"  @ top (buff=0.9)  YELLOW  anim_type (white cursor)│
+├──────────────────────┬─────────────────────────────────────┤
+│  LEFT PANEL          │  RIGHT PANEL                        │
+│  x center: -3.55     │  x center: +3.55                    │
+│  [shape_question]    │  [BG text]                          │
+│  @ (-3.55, content_y)  Iconify / beat icons/│  @ (+3.55, content_y)  white on orange│
+│  [shape_question]    │    So first…                        │
+│  @ (-3.55, content_y)  Iconify / beat icons/│    what exactly is Python?          │
+└─────────────────────────────────────────────────────────────┘
+  Layout: No card — white text on RIGHT, icon on LEFT
+  Vertical: panels centered below label, not full frame
+  • shape_question: WHITE circle + YELLOW ? height 1.6

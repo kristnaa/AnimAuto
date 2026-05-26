@@ -1,0 +1,21 @@
+─── GRID LAYOUT (card_right_icon_left) ───
+┌─────────────────────────────────────────────────────────────┐
+│  LABEL: "Welcome to Python for AI"  @ top (buff=0.9)  YELLOW  anim_type (white cursor)│
+├──────────────────────┬─────────────────────────────────────┤
+│  LEFT PANEL          │  RIGHT PANEL                        │
+│  x center: -3.55     │  x center: +3.55                    │
+│  [icon_python]       │  [ui_card]                          │
+│  @ (-3.55, content_y)  size 1.2, color BLUE│  @ (+3.55, content_y)  size 5.6 × 5.0, empty then type│
+│  [icon_scream]       │  [card lines 1–4]                   │
+│  @ (-3.55, content_y)  swap @ same anchor, t≈punchline│  @ (+3.55, content_y)  white on orange│
+│                      │    black, TypeWithCursor            │
+│                      │  [punchline]                        │
+│                      │  @ (+3.55, content_y)  white on orange│
+│                      │    line 5 after lines 1–4 fade      │
+└─────────────────────────────────────────────────────────────┘
+  Layout: White card on RIGHT, icon/visual on LEFT (default)
+  Vertical: panels centered below label, not full frame
+  • Card grows EMPTY — text not inside GrowFromCenter
+  • Lines 1–4 fade before punchline
+  • "screaming" → RED + anim_wiggle; face wiggles too
+  • icon_python FadeOut → icon_scream FadeIn (same spot)

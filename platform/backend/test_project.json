@@ -1,0 +1,53 @@
+{
+  "id": "test01",
+  "name": "Test Intro",
+  "style_pack": "course_clean",
+  "use_camera": false,
+  "beats": [
+    {
+      "label": "Welcome to Python for AI",
+      "type": "joke punchline",
+      "layout": "card_right_icon_left",
+      "card_lines": [
+        "Today, we meet Python…",
+        "the programming language",
+        "that helps humans",
+        "talk to computers."
+      ],
+      "punchline_line": "Without screaming too much.",
+      "visuals": {
+        "primary": {"concept": "python", "role": "subject"},
+        "swap": {"concept": "frustration", "role": "punchline", "trigger": "screaming"}
+      },
+      "emphasis": [{"word": "screaming", "color": "RED", "animation": "wiggle"}],
+      "hold": 1.2
+    },
+    {
+      "label": "Big Question",
+      "type": "question",
+      "layout": "text_right_icon_left",
+      "bg_lines": ["So first…", "what exactly is Python?"],
+      "visuals": {
+        "primary": {"concept": "question", "role": "question"}
+      },
+      "emphasis": [{"word": "Python", "color": "YELLOW", "animation": "indicate"}],
+      "hold": 1.2
+    },
+    {
+      "label": "Simple Answer",
+      "type": "statement",
+      "layout": "card_right_icon_left",
+      "card_lines": [
+        "Python is a programming language.",
+        "We write instructions,",
+        "and the computer follows them.",
+        "Usually."
+      ],
+      "visuals": {
+        "primary": {"concept": "terminal", "role": "tool"}
+      },
+      "hold": 1.2
+    }
+  ],
+  "chat": []
+}

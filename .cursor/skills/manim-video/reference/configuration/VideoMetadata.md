@@ -1,0 +1,33 @@
+# Videometadata
+
+
+---
+
+## VideoMetadata - Manim Community v0.20.1
+
+Source: https://docs.manim.community/en/stable/reference/manim.utils.commands.VideoMetadata.html
+
+VideoMetadata¶
+
+Qualified name: manim.utils.commands.VideoMetadata
+
+class VideoMetadata[source]¶
+Bases: TypedDict
+
+Methods
+
+Attributes
+
+width
+
+height
+
+nb_frames
+
+duration
+
+avg_frame_rate
+
+codec_name
+
+pix_fmt
