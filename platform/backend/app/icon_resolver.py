@@ -103,6 +103,7 @@ def validate_icon_refs(beats: list[dict]) -> list[dict]:
     root = Path(__file__).resolve().parents[2]
     sys.path.insert(0, str(root / "animations"))
     from icon_library import ensure_iconify_ref  # noqa: E402
+    from visual_resolver import _normalize_icons_manifest, _parse_manifest_icon  # noqa: E402
 
     out: list[dict] = []
     for beat in beats:
@@ -128,11 +129,17 @@ def validate_icon_refs(beats: list[dict]) -> list[dict]:
                     manifest[icon_id] = fixed
                 visuals[slot] = spec
 
-        for icon_id, ref in list(manifest.items()):
-            if not isinstance(ref, str) or not ICONIFY_REF.match(ref):
+        for icon_id, raw in list(manifest.items()):
+            if not isinstance(raw, str):
+                continue
+            ref, meta = _parse_manifest_icon(raw)
+            if not ICONIFY_REF.match(ref):
                 continue
             desc = icon_id.replace("_", " ").replace("icon ", "").replace("shape ", "")
-            manifest[icon_id] = ensure_iconify_ref(ref, desc)
+            fixed = ensure_iconify_ref(ref, desc)
+            manifest[icon_id] = fixed
+
+        manifest = _normalize_icons_manifest(manifest)
 
         if visuals:
             beat["visuals"] = visuals

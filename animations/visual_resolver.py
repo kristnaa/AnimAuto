@@ -52,11 +52,15 @@ def _normalize_visuals(visuals: Any) -> dict:
             out["primary"] = _as_dict(visuals[0])
         if len(visuals) > 1:
             out["swap"] = _as_dict(visuals[1])
+        if len(visuals) > 2:
+            out["stack"] = [_as_dict(item) for item in visuals[2:]]
         return out
     if isinstance(visuals, dict):
+        stack = visuals.get("stack")
         return {
             "primary": _as_dict(visuals.get("primary") or visuals.get("left")),
             "swap": _as_dict(visuals.get("swap") or visuals.get("left_swap"), default={}),
+            "stack": stack if isinstance(stack, list) else None,
         }
     return {}
 
@@ -139,6 +143,109 @@ def _pick_candidate(entry: dict, style_pack: dict) -> dict:
 
 ICONIFY_REF = re.compile(r"^[a-z0-9-]+:[a-z0-9-]+$")
 
+ICON_STACK_ORDER = {
+    "icon_mobile": 0,
+    "icon_web": 1,
+    "icon_desktop": 2,
+}
+
+
+def _parse_manifest_icon(value: str) -> tuple[str, dict[str, Any]]:
+    """Parse icons.json values like ``fe:mobile | color: WHITE | scale: 1.4``."""
+    ref_part = (value or "").strip()
+    meta: dict[str, Any] = {}
+    if "|" in ref_part:
+        chunks = [chunk.strip() for chunk in ref_part.split("|")]
+        ref_part = chunks[0]
+        for chunk in chunks[1:]:
+            if ":" not in chunk:
+                continue
+            key, val = chunk.split(":", 1)
+            key = key.strip().lower()
+            val = val.strip()
+            if key == "color":
+                meta["color"] = val
+            elif key == "scale":
+                try:
+                    meta["scale"] = float(val)
+                except ValueError:
+                    pass
+            elif key == "trigger":
+                meta["trigger"] = val
+    return ref_part.strip(), meta
+
+
+def _normalize_icons_manifest(manifest: dict[str, str]) -> dict[str, str]:
+    """Strip ``| color: …`` suffixes so manifest values are plain Iconify refs."""
+    out: dict[str, str] = {}
+    for icon_id, raw in manifest.items():
+        if not isinstance(raw, str):
+            continue
+        ref, _ = _parse_manifest_icon(raw)
+        if ref:
+            out[icon_id] = ref
+    return out
+
+
+def _normalize_card_content(beat: dict) -> dict:
+    """Card layouts need card_lines — promote bg_lines when authors use the wrong field."""
+    beat = dict(beat)
+    layout = beat.get("layout", "")
+    if "card" not in layout:
+        return beat
+    if not beat.get("card_lines") and beat.get("bg_lines"):
+        beat["card_lines"] = list(beat["bg_lines"])
+    if not beat.get("card_side"):
+        if "card_left" in layout:
+            beat["card_side"] = "left"
+        elif "card_right" in layout:
+            beat["card_side"] = "right"
+    return beat
+
+
+def _icon_stack_from_manifest(
+    beat: dict, style_pack_id: str, *, manifest: dict[str, str] | None = None
+) -> list[dict]:
+    """Build stacked icon specs from beat icons manifest (mobile/web/desktop, etc.)."""
+    manifest = manifest if manifest is not None else (beat.get("icons") or {})
+    if not manifest:
+        return []
+
+    named = [icon_id for icon_id in manifest if icon_id.startswith("icon_")]
+    skip_primary = len(named) >= 3 and any(
+        icon_id not in ("icon_primary",) for icon_id in named
+    )
+
+    items: list[tuple[str, dict]] = []
+    for icon_id, raw in manifest.items():
+        if not isinstance(raw, str):
+            continue
+        if skip_primary and icon_id == "icon_primary":
+            continue
+        ref, meta = _parse_manifest_icon(raw)
+        if not ICONIFY_REF.match(ref):
+            continue
+        concept = icon_id.removeprefix("icon_").removeprefix("shape_")
+        trigger = meta.get("trigger") or concept
+        slot = {"ref": ref, "icon_id": icon_id, "trigger": trigger, **meta}
+        items.append(
+            (
+                icon_id,
+                resolve_visual_slot(
+                    slot,
+                    concept=concept,
+                    role="subject",
+                    style_pack_id=style_pack_id,
+                ),
+            )
+        )
+
+    items.sort(key=lambda pair: (ICON_STACK_ORDER.get(pair[0], 50), pair[0]))
+    specs = [spec for _, spec in items][:4]
+    if len(specs) >= 2:
+        return specs
+    return []
+
 
 def _infer_kind_from_ref(ref: str, icon_id: str = "") -> str:
     if ref.startswith("assets/") or ("/" in ref and ref.endswith(".svg")):
@@ -177,6 +284,7 @@ def resolve_visual_slot(
             "ref": ref,
             "scale": float(slot.get("scale", 1.2)),
             "color": color,
+            **{k: slot[k] for k in ("trigger", "icon_id") if slot.get(k)},
         }
     return resolve_concept(concept, style_pack_id=style_pack_id, role=role)
 
@@ -207,6 +315,11 @@ def resolve_concept(
 def resolve_beat_visuals(beat: dict, style_pack_id: str | None = None) -> dict:
     """Resolve all visuals for a beat dict. Mutates and returns beat with resolved visuals."""
     pack = style_pack_id or beat.get("style_pack", "course_clean")
+    beat = _normalize_card_content(beat)
+    raw_icons = dict(beat.get("icons") or {})
+    if raw_icons:
+        beat = dict(beat)
+        beat["icons"] = _normalize_icons_manifest(raw_icons)
     beat_type = beat.get("type", "statement").lower()
     rules = TYPE_RULES.get(beat_type, TYPE_RULES["statement"])
 
@@ -220,20 +333,37 @@ def resolve_beat_visuals(beat: dict, style_pack_id: str | None = None) -> dict:
     )
 
     visuals_in = _normalize_visuals(beat.get("visuals"))
-    resolved: dict[str, dict] = {}
+    stack_in = visuals_in.get("stack")
+    if isinstance(stack_in, list) and stack_in:
+        stack_specs = [
+            resolve_visual_slot(
+                _as_dict(item),
+                concept=_as_dict(item).get("concept", f"stack_{i}"),
+                role="subject",
+                style_pack_id=pack,
+            )
+            for i, item in enumerate(stack_in)
+        ]
+    else:
+        stack_specs = _icon_stack_from_manifest(beat, pack, manifest=raw_icons)
 
-    # Primary left visual
+    resolved: dict[str, dict | list] = {}
+    if stack_specs:
+        resolved["stack"] = stack_specs
+
+    # Primary panel visual (single icon when no stack)
     primary = visuals_in.get("primary") or {}
     concept = primary.get("concept")
     role = primary.get("role") or rules.get("left_role", "subject")
     if not concept:
         concept = rules.get("left_concept") or infer_concept_from_text(all_text, beat_type, role)
-    resolved["primary"] = resolve_visual_slot(
-        primary,
-        concept=concept,
-        role=role,
-        style_pack_id=pack,
-    )
+    if not stack_specs:
+        resolved["primary"] = resolve_visual_slot(
+            primary,
+            concept=concept,
+            role=role,
+            style_pack_id=pack,
+        )
 
     # Optional swap (punchline)
     swap = visuals_in.get("swap")
@@ -257,6 +387,8 @@ def resolve_beat_visuals(beat: dict, style_pack_id: str | None = None) -> dict:
     beat = dict(beat)
     beat["visuals_resolved"] = resolved
     beat["style_pack"] = pack
+    if beat.get("card_lines") and "card" in beat.get("layout", ""):
+        beat.pop("bg_lines", None)
     return beat
 
 

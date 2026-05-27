@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -33,11 +34,20 @@ def render_scene(
     scene_file = scene_file.resolve()
     if scene_class == "GeneratedScene":
         scene_class = detect_scene_class_from_file(scene_file)
+
+    if output_mp4:
+        output_mp4 = output_mp4.resolve()
+        output_mp4.parent.mkdir(parents=True, exist_ok=True)
+        if output_mp4.exists():
+            output_mp4.unlink()
+
     python = str(MANIM_PYTHON) if MANIM_PYTHON.exists() else sys.executable
     cmd = [
         python,
         "-m",
         "manim",
+        "render",
+        "--flush_cache",
         quality,
         str(scene_file),
         scene_class,
@@ -56,19 +66,18 @@ def render_scene(
     if result.returncode != 0:
         raise RuntimeError(f"Manim render failed:\n{result.stderr[-3000:]}")
 
-    if output_mp4 and output_mp4.exists():
-        return output_mp4
-
-    # Find latest mp4 under media/videos
+    # Find latest mp4 under media/videos for this scene
     media = MANIM_ROOT / "media" / "videos"
-    candidates = sorted(media.rglob(f"{scene_class}.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+    candidates = sorted(
+        media.rglob(f"{scene_class}.mp4"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
     if not candidates:
         raise FileNotFoundError("Rendered MP4 not found")
+
     mp4 = candidates[0]
     if output_mp4:
-        output_mp4.parent.mkdir(parents=True, exist_ok=True)
-        import shutil
-
         shutil.copy2(mp4, output_mp4)
         return output_mp4
     return mp4

@@ -540,7 +540,14 @@ def preview_video(project_id: str):
     mp4 = store.render_path(project_id)
     if not mp4.exists():
         raise HTTPException(status_code=404, detail="No preview yet")
-    return FileResponse(mp4, media_type="video/mp4")
+    return FileResponse(
+        mp4,
+        media_type="video/mp4",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
 
 
 @app.get("/api/projects/{project_id}/download")

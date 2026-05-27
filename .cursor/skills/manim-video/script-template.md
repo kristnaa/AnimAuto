@@ -10,7 +10,7 @@ Copy, fill in, and paste when requesting a new Manim video.
 
 In **Manimations Studio**, paste beats into the Beat script tab and click **Generate**.
 
-**Icons — describe + color only (GPT picks Iconify):**
+**Icons — describe + color (GPT picks Iconify), or paste explicit refs:**
 
 ```markdown
 ─── ICONS ───
@@ -19,10 +19,27 @@ icon_scream: screaming panicked emoji face | color: WHITE
 shape_question: large question mark help circle | color: WHITE | scale: 1.8
 ```
 
-- **1st icon** → primary (left panel). **2nd icon** → swap (punchline joke).
+- **1 icon** → fills the icon panel (100% × 100%).
+- **2 icons** → side-by-side grid (50% × 100% each) — or stacked with `ICON GRID: vertical`.
+- **3 icons** → two top + one bottom (default) — or `ICON GRID: triple_bottom`.
+- **4 icons** → 2×2 grid. **Max 4 icons per beat.**
+- **1st + 2nd only (joke):** 1st → primary, 2nd → swap at punchline (shown one at a time).
+- **3+ icons:** shown in icon panel grid — all at once **or** one-by-one on trigger words (see ICON REVEAL).
 - GPT resolves descriptions to Iconify refs at Generate time.
 - **Advanced:** paste explicit refs (`fa6-brands:python`) if you already know them.
 - Template file: `platform/assets/beat-script-template.md`
+
+### Icon patterns at a glance
+
+| Pattern | Icons | Layout example | ICON REVEAL | When |
+|---------|-------|----------------|-------------|------|
+| Single brand | 1 | `card_right_icon_left` | — | Statement, one logo |
+| Joke swap | 2 | `card_right_icon_left` | — (swap at punchline) | Setup + punchline icon swap |
+| Multi grid | 2–4 | `card_left_icon_right` | `together` | All icons after text |
+| Word-sync list | 2–4 | `card_left_icon_right` | `on_word` + `trigger:` | Name each item as you type |
+| Question (no card) | 1 | `text_right_icon_left` | — | Single question mark |
+
+**Trigger words must appear in your TEXT** (card or white-on-BG) — e.g. line 2: `mobile, web, and desktop!`
 
 ---
 
@@ -140,7 +157,64 @@ Pick one per beat. Generate ASCII diagram with `generate_grid.py`.
 | `text_right_icon_left` | No card — white text right, icon left |
 | `text_left_icon_right` | No card — white text left, icon right |
 | `icon_left_anim_right` | Icon left, morph/animation right |
-| `card_right_stack_left` | Card right, **stacked** icons left |
+| `card_right_stack_left` | Card right, **stacked** icons left (legacy name — use multi-icon + grid) |
+
+**Icon panel side:** `card_right_*` / `text_right_*` → icons on **left**. `card_left_*` / `text_left_*` → icons on **right**.
+
+Card beats use `TEXT (card, black)` → `card_lines`. If you use `TEXT (white, on BG)` on a card layout, Studio promotes it to card content automatically.
+
+---
+
+## ICON GRID (multi-icon panel, max 4)
+
+When a beat has **2–4 icons** shown together, they are placed in an **invisible grid** inside the **icon panel only** (half the frame below the heading — not the full page). No grid lines are drawn.
+
+| Icons | Default grid | Cell layout |
+|-------|--------------|-------------|
+| 1 | `single` | 100% × 100% |
+| 2 | `horizontal` | 50% × 100% each (side by side) |
+| 2 | `vertical` | 100% × 50% each (stacked) |
+| 3 | `triple_top` | two top (50%×50%), one bottom full width |
+| 3 | `triple_bottom` | one top full width, two bottom |
+| 4 | `quad` | 2×2 (50% × 50% each) |
+
+Optional beat field (auto if omitted):
+
+```
+ICON GRID:  auto            # default — picks layout from icon count
+ICON GRID:  horizontal      # 2 icons side by side
+ICON GRID:  vertical        # 2 icons stacked
+ICON GRID:  triple_top      # 3 icons — 2 top, 1 bottom
+ICON GRID:  triple_bottom   # 3 icons — 1 top, 2 bottom
+ICON GRID:  quad            # 4 icons — 2×2
+```
+
+**Joke beats (primary + swap):** use exactly **2 icons** — only the primary shows until punchline, then swap. Grid applies when **3+ icons** are listed.
+
+---
+
+## ICON REVEAL (word-synced icons)
+
+Icons can appear **when their word is typed** instead of all at once after the text.
+
+| Mode | Behavior |
+|------|----------|
+| `auto` (default) | If any icon has `trigger: word` → sync on that word; others appear at end |
+| `on_word` | Icons with `trigger` fade in as the word is typed |
+| `together` | All icons after text (ignore triggers for timing) |
+
+Add `trigger:` on each icon line (defaults to icon name — `icon_mobile` → `mobile`):
+
+```
+ICON REVEAL:  on_word          # optional — auto when triggers present
+
+─── ICONS ───
+icon_mobile: fe:mobile | color: WHITE | trigger: mobile
+icon_web: streamline:web-solid | color: WHITE | trigger: web
+icon_desktop: boxicons:desktop-filled | color: WHITE | trigger: desktop
+```
+
+**3–4 icon word-sync:** camera restores to **full frame** so card + icon grid stay visible during sync (requires `CAMERA: moving` on MovingBeatScene projects; static BeatScene is already full frame).
 
 ```bash
 # Examples
@@ -172,10 +246,10 @@ Text on BG:     WHITE (when no card)
 Text on card:   BLACK, TypeWithCursor + YELLOW cursor
 Accent text:    RED allowed for emphasis words (e.g. joke punchline)
 Icon colors:    WHITE default on orange; brand colors OK (e.g. BLUE python)
-Camera:         none  ← later phase
-Font label:     32
+Camera:         none | moving — full frame auto on 3–4 icon word-sync
+Font label:     48
 Font card body: 28
-Font BG text:   34
+Font BG text:   36
 ```
 
 ### Text animation rules
@@ -196,21 +270,27 @@ Font BG text:   34
 
 ### Studio beat script (recommended)
 
-In the **ICONS** section, write **what you want + color** — no Iconify lookup required:
+In the **ICONS** section, each line:
 
 ```
-─── ICONS ───
-icon_id: plain English description | color: WHITE | scale: 1.2
+icon_id: description or iconify:ref | color: WHITE | scale: 1.2 | trigger: word
 ```
 
 | Part | Example |
 |------|---------|
-| icon_id | `icon_python`, `icon_terminal`, `shape_question` |
+| icon_id | `icon_python`, `icon_terminal`, `shape_question`, `icon_mobile` |
 | description | `Python programming language brand logo` |
 | color | `WHITE`, `BLUE`, `#3776AB` |
 | scale | optional, default 1.2 |
+| trigger | optional — word that reveals this icon (`trigger: mobile`) |
 
-**Slot order:** 1st → primary (left). 2nd → swap (punchline).
+**Slot order**
+
+| Count | Behavior |
+|-------|----------|
+| 1 icon | Primary — fills icon panel |
+| 2 icons (joke) | 1st = primary, 2nd = swap at punchline |
+| 2–4 icons (multi) | Grid in icon panel; optional word-sync via `trigger:` |
 
 **Examples**
 
@@ -219,6 +299,37 @@ icon_python: Python programming language brand logo | color: #3776AB
 icon_scream: screaming panicked emoji face | color: WHITE
 icon_terminal: command line terminal icon | color: WHITE
 shape_question: large question mark help circle | color: WHITE | scale: 1.8
+```
+
+**Multi-icon + word-sync (platforms — card left, icons right)**
+
+```
+LAYOUT:     card_left_icon_right
+ICON GRID:  triple_top
+ICON REVEAL: on_word
+
+─── CONTENT ───
+TEXT (card, black):
+Flutter allows you to build apps for
+mobile, web, and desktop!
+
+─── ICONS ───
+icon_mobile: fe:mobile | color: WHITE | trigger: mobile
+icon_web: streamline:web-solid | color: WHITE | trigger: web
+icon_desktop: boxicons:desktop-filled | color: WHITE | trigger: desktop
+```
+
+**Multi-icon batch (all icons after text)**
+
+```
+LAYOUT:     card_left_icon_right
+ICON GRID:  triple_top
+ICON REVEAL: together
+
+─── ICONS ───
+icon_mobile: fe:mobile | color: WHITE
+icon_web: streamline:web-solid | color: WHITE
+icon_desktop: boxicons:desktop-filled | color: WHITE
 ```
 
 GPT resolves to Iconify at Generate. Icons cache under `assets/icons/cache/`.
@@ -259,7 +370,8 @@ Register beat icons in `icons.json`, then `fetch_icons.py --episode N --beat M`.
 |----|-------|---------|
 | `anim_type` | `TypeWithCursor` | **Default** all text |
 | `anim_grow_card` | `GrowFromCenter` | Empty card only |
-| `anim_fade_in` | `FadeIn` | Icons |
+| `anim_fade_in` | `FadeIn` | Icons (batch reveal) |
+| `anim_fade_in_on_word` | `FadeIn` per trigger | Icon when trigger word typed |
 | `anim_fade_out` | `FadeOut` | Single element / card lines |
 | `anim_swap_icon` | `FadeOut(a), FadeIn(b)` | Same anchor swap |
 | `anim_wiggle` | `Wiggle` | Joke word + matching icon |
@@ -286,6 +398,8 @@ One beat = one block. **Always include GRID + TIMELINE.**
 TYPE:       question | statement | list | joke | code_demo | recap | outro
 DURATION:   ~Xs
 LAYOUT:     card_right_icon_left   ← preset ID (see above)
+ICON GRID:  auto                   ← optional: horizontal | vertical | triple_top | triple_bottom | quad
+ICON REVEAL: auto                   ← optional: on_word | together (auto sync when triggers set)
 EPISODE:    1
 BEAT:       N
 CAMERA:     none | moving | zoomed | 3d   ← default: none
@@ -407,6 +521,53 @@ Regenerate grid: `python .cursor/skills/manim-video/scripts/generate_grid.py --e
 
 ---
 
+## FILLED EXAMPLE — BEAT 2 (multi-icon, card left)
+
+```
+### BEAT 2 — what_can_you_build
+
+TYPE:       question
+DURATION:   ~5s
+LAYOUT:     card_left_icon_right
+ICON GRID:  triple_top
+ICON REVEAL: on_word
+CAMERA:     none
+
+─── CONTENT ───
+LABEL:
+What Can You Build?
+
+TEXT (card, black):
+Flutter allows you to build apps for
+mobile, web, and desktop!
+
+─── ICONS ───
+icon_mobile: fe:mobile | color: WHITE | trigger: mobile
+icon_web: streamline:web-solid | color: WHITE | trigger: web
+icon_desktop: boxicons:desktop-filled | color: WHITE | trigger: desktop
+
+─── CARD ───
+SIDE: left | SIZE: 5.6 × 5.0
+
+HOLD: 1.2s
+```
+
+Icons appear on the **right** in a 2+1 grid. Each icon fades in when its word is typed. Card on the **left**. With 3–4 icons, camera stays at **full frame** during word-sync.
+
+─── TIMELINE ───
+| t (s) | Element           | Action                              |
+|-------|-------------------|-------------------------------------|
+| 0.0   | LABEL             | anim_type                           |
+| 0.3   | ui_card (empty)   | anim_grow_card @ left               |
+| 0.7   | line 1            | anim_type                           |
+| 1.5   | line 2            | anim_type                           |
+| 1.6   | icon_mobile       | anim_fade_in_on_word "mobile"       |
+| 1.9   | icon_web          | anim_fade_in_on_word "web"            |
+| 2.2   | icon_desktop      | anim_fade_in_on_word "desktop"      |
+| 3.5   | HOLD              | wait_med 1.2s                       |
+
+---
+
 ## BEAT TEMPLATE (compact)
 
 ```
@@ -437,10 +598,65 @@ TIMELINE:
 5. **Empty card first**, then `anim_type` each line separately.
 6. **Label animates** — `anim_type` with white cursor, not `FadeIn`.
 7. **Panel vertical center** — below heading (`panel_anchor`), not frame center.
-8. **Icon swaps** — `FadeOut` + `FadeIn` at same `panel_anchor`.
-9. **Emphasis** — red word + wiggle (+ icon wiggle if paired).
-10. **Icons (Studio)** — describe + color in ICONS section; GPT picks Iconify. **Icons (Episode)** — `icons.json` + `fetch_icons.py`.
-11. **Camera:** optional — see [CAMERA](#camera-system) below; default `none`.
+8. **Icon swaps** — `FadeOut` + `FadeIn` at same `panel_anchor` (joke beats only).
+9. **Multi-icon grid** — 2–4 icons use invisible grid; optional `trigger:` word-sync via `ICON REVEAL`.
+10. **Word-sync camera** — 3–4 icons with triggers → full-frame view during sync.
+11. **Emphasis** — red word + wiggle (+ icon wiggle if paired).
+12. **Icons (Studio)** — describe + color in ICONS section; GPT picks Iconify. **Icons (Episode)** — `icons.json` + `fetch_icons.py`.
+13. **Camera:** optional — see [CAMERA](#camera-system) below; default `none`.
+
+---
+
+## FIELDS CHECKLIST (per beat)
+
+| Section | Required? | Notes |
+|---------|-----------|-------|
+| `### BEAT N — slug` | Yes | Unique slug |
+| TYPE | Yes | statement, question, joke punchline |
+| LAYOUT | Yes | See layout presets |
+| ICON GRID | If 2–4 icons | auto, horizontal, vertical, triple_top, triple_bottom, quad |
+| ICON REVEAL | Optional | auto, on_word, together |
+| CONTENT / LABEL | Yes | Yellow heading |
+| CONTENT / TEXT | Yes | `TEXT (card, black)` or `TEXT (white, on BG)` |
+| ICONS | Yes | 1–4 lines; optional `trigger:` per icon |
+| CARD | If card layout | SIDE + SIZE |
+| EMPHASIS | Optional | word, color, animation |
+| CAMERA | If moving | hooks + `cam_restore: exit` |
+| HOLD | Yes | e.g. 1.2s |
+
+---
+
+## JSON ALTERNATIVE (Studio / advanced)
+
+```json
+{
+  "name": "Introduction to Flutter",
+  "style_pack": "course_clean",
+  "use_camera": false,
+  "beats": [
+    {
+      "label": "What Can You Build?",
+      "type": "question",
+      "layout": "card_left_icon_right",
+      "icon_grid": "triple_top",
+      "icon_reveal": "on_word",
+      "card_lines": [
+        "Flutter allows you to build apps for",
+        "mobile, web, and desktop!"
+      ],
+      "card_side": "left",
+      "icons": {
+        "icon_mobile": "fe:mobile",
+        "icon_web": "streamline:web-solid",
+        "icon_desktop": "boxicons:desktop-filled"
+      },
+      "hold": 1.2
+    }
+  ]
+}
+```
+
+Triggers default from icon_id (`icon_mobile` → `mobile`). Override in visuals stack or with `| trigger: word` in script ICONS lines.
 
 ---
 

@@ -94,13 +94,22 @@ def load_visual(scene, spec: dict) -> "Mobject":
 def prefetch_beat_visuals(beat: dict) -> list[Path]:
     """Download/cache all iconify assets for a beat."""
     saved: list[Path] = []
-    for slot, spec in (beat.get("visuals_resolved") or {}).items():
+    resolved = beat.get("visuals_resolved") or {}
+    slots: list = []
+    stack = resolved.get("stack")
+    if isinstance(stack, list):
+        slots.extend(stack)
+    for slot_name in ("primary", "swap"):
+        spec = resolved.get(slot_name)
+        if isinstance(spec, dict):
+            slots.append(spec)
+    for spec in slots:
         if not isinstance(spec, dict) or spec.get("kind") != "iconify":
             continue
         ref = spec.get("ref", "")
         if ":" not in ref:
             continue
         prefix, name = ref.split(":", 1)
-        desc = spec.get("description") or spec.get("concept") or slot
+        desc = spec.get("description") or spec.get("concept") or "icon"
         saved.append(fetch_iconify_svg(prefix, name, description=str(desc)))
     return saved

@@ -9,6 +9,8 @@ BG_PATH = "/Users/enfec/manimations/background/orange_theme_BG.png"
 LABEL_TOP_BUFF = 0.9
 LABEL_CONTENT_GAP = 0.25
 PANEL_FRAME_WIDTH = 7.5
+ICON_PANEL_PAD_X = 0.35
+ICON_PANEL_PAD_Y = 0.25
 CARD_PAD_X = 0.45
 CARD_PAD_Y = 0.35
 
@@ -40,6 +42,21 @@ class BeatLayoutMixin:
         x = self.right_center()[0] if side == "right" else self.left_center()[0]
         y = self.content_center_y(label)
         return np.array([x, y, 0.0])
+
+    def icon_panel_bounds(self, side: str, label: Mobject) -> dict:
+        """Axis-aligned bounds for the icon half-panel below the label."""
+        anchor = self.panel_anchor(side, label)
+        width = config.frame_width / 2 - 2 * ICON_PANEL_PAD_X
+        frame_bottom = -config.frame_height / 2
+        content_top = label.get_bottom()[1] - LABEL_CONTENT_GAP
+        height = content_top - frame_bottom - 2 * ICON_PANEL_PAD_Y
+        return {
+            "center": anchor,
+            "width": width,
+            "height": height,
+            "left": anchor[0] - width / 2,
+            "bottom": anchor[1] - height / 2,
+        }
 
     def on_card(self, text, font_size=28):
         return Text(text, font_size=font_size, color=BLACK, weight=BOLD)
@@ -139,6 +156,47 @@ class BeatLayoutMixin:
             TypeWithCursor(text_mob, cursor, time_per_char=time_per_char, leave_cursor_on=False),
             run_time=max(0.4, len(text_mob.text) * time_per_char),
         )
+
+    def type_line_with_icon_triggers(
+        self,
+        template_mob,
+        trigger_map: dict[str, Mobject],
+        *,
+        time_per_char=0.05,
+        cursor_color=YELLOW,
+        revealed: set[str] | None = None,
+    ) -> set[str]:
+        """Type a line left-to-right; FadeIn icons when trigger words are typed."""
+        from icon_triggers import split_line_by_triggers
+
+        revealed = set(revealed or [])
+        segments = split_line_by_triggers(template_mob.text, list(trigger_map.keys()))
+        font_size = getattr(template_mob, "font_size", None) or 28
+        color = BLACK
+        try:
+            color = template_mob.get_color()
+        except Exception:
+            pass
+
+        y = template_mob.get_center()[1]
+        x = template_mob.get_left()[0]
+
+        for seg_text, trigger_key in segments:
+            if seg_text:
+                seg = Text(str(seg_text), font_size=font_size, color=color, weight=BOLD)
+                seg.move_to([x + seg.width / 2, y, 0])
+                self.type_text(seg, time_per_char=time_per_char, cursor_color=cursor_color)
+                x = seg.get_right()[0]
+
+            if trigger_key:
+                key = trigger_key.lower()
+                if key not in revealed and key in trigger_map:
+                    icon = trigger_map[key]
+                    icon.set_opacity(1)
+                    self.play(FadeIn(icon, scale=1.02), run_time=0.35)
+                    revealed.add(key)
+
+        return revealed
 
     def fade_clear(self, *mobjects, run_time=0.55):
         on_scene = set(self.mobjects)

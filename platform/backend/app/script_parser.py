@@ -54,6 +54,8 @@ def _parse_icon_line(line: str) -> tuple[str, str, dict[str, Any]] | None:
         meta["color"] = extras["color"]
     if extras.get("scale"):
         meta["scale"] = float(extras["scale"])
+    if extras.get("trigger"):
+        meta["trigger"] = extras["trigger"]
     return icon_id, ref, meta
 
 
@@ -192,6 +194,8 @@ def _parse_beat_block(block: str) -> dict[str, Any]:
     for key, field in [
         (r"^TYPE:\s*(.+)$", "type"),
         (r"^LAYOUT:\s*(.+)$", "layout"),
+        (r"^ICON GRID:\s*(.+)$", "icon_grid"),
+        (r"^ICON REVEAL:\s*(.+)$", "icon_reveal"),
         (r"^DURATION:\s*(.+)$", "duration"),
         (r"^HOLD:\s*([\d.]+)", "hold"),
         (r"^CAMERA:\s*(.+)$", "camera_mode"),
@@ -278,9 +282,13 @@ def _parse_beat_block(block: str) -> dict[str, Any]:
             beat["icons"] = manifest
 
         if slots:
-            visuals["primary"] = {**slots[0], "role": "subject"}
-        if len(slots) > 1:
-            visuals["swap"] = {**slots[1], "role": "punchline"}
+            layout = beat.get("layout", "")
+            if len(slots) >= 3 or "stack" in layout:
+                visuals["stack"] = [{**slot, "role": "subject"} for slot in slots[:4]]
+            else:
+                visuals["primary"] = {**slots[0], "role": "subject"}
+                if len(slots) > 1:
+                    visuals["swap"] = {**slots[1], "role": "punchline"}
 
     if visuals:
         beat["visuals"] = visuals

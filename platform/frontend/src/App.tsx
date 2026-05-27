@@ -98,6 +98,12 @@ export default function App() {
     setHdReady(false);
   };
 
+  const beginRenderPreview = () => {
+    setRendering(true);
+    setHasPreview(false);
+    setHdReady(false);
+  };
+
   const loadCode = useCallback(
     async (projectId: string, opts?: { force?: boolean }) => {
       const hasGeneratedSource =
@@ -144,6 +150,7 @@ export default function App() {
     if (!msg || !project || loading) return;
     setInput("");
     setLoading(true);
+    beginRenderPreview();
     setError(null);
     try {
       const res = await sendChat(project.id, msg);
@@ -159,12 +166,14 @@ export default function App() {
       setError(String(e));
     } finally {
       setLoading(false);
+      setRendering(false);
     }
   };
 
   const handleScriptGenerate = async () => {
     if (!project || !script.trim() || loading) return;
     setLoading(true);
+    beginRenderPreview();
     setError(null);
     try {
       const res = await submitScript(project.id, script, useAiParse);
@@ -182,6 +191,7 @@ export default function App() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
+      setRendering(false);
     }
   };
 
@@ -220,7 +230,7 @@ export default function App() {
   const handleCodeApply = async () => {
     if (!project || !code.trim() || loading) return;
     setLoading(true);
-    setRendering(true);
+    beginRenderPreview();
     setError(null);
     try {
       await saveProjectCode(project.id, code, false);
@@ -263,7 +273,7 @@ export default function App() {
       const res = await revertProject(project.id, snapshotId);
       setProject(res.project);
       setShowHistory(false);
-      setRendering(true);
+      beginRenderPreview();
       await renderProject(project.id);
       onPreviewReady();
       await loadCode(project.id, { force: true });
@@ -278,7 +288,7 @@ export default function App() {
 
   const handleRerender = async () => {
     if (!project) return;
-    setRendering(true);
+    beginRenderPreview();
     setError(null);
     try {
       if (previewView === "code" || codeCustomized) {
@@ -630,7 +640,7 @@ export default function App() {
                     <p>{exporting ? "Exporting 1080p60…" : "Rendering with Manim…"}</p>
                   </div>
                 )}
-                {project && hasPreview && !exporting && (
+                {project && hasPreview && !exporting && !rendering && !loading && (
                   <video
                     key={previewKey}
                     className="preview-video"
