@@ -10,7 +10,7 @@ services:
     restart: unless-stopped
 
     ports:
-      - "8000:80"
+      - "8088:80"
 
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
