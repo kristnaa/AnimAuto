@@ -53,13 +53,16 @@ def _resolve_icon_descriptions(beats: list[dict]) -> list[dict]:
 
 
 def _prepare_beats(beats: list[dict]) -> list[dict]:
+    from app.beat_compiler import _sanitize_beat  # noqa: E402
     from app.icon_resolver import beats_need_icon_resolution, validate_icon_refs  # noqa: E402
+    from beat_types import apply_type_defaults  # noqa: E402
 
-    if beats_need_icon_resolution(beats):
-        beats = _resolve_icon_descriptions(beats)
+    prepared = [apply_type_defaults(_sanitize_beat(dict(b))) for b in beats]
+    if beats_need_icon_resolution(prepared):
+        prepared = _resolve_icon_descriptions(prepared)
     else:
-        beats = validate_icon_refs(beats)
-    return beats
+        prepared = validate_icon_refs(prepared)
+    return prepared
 
 
 def _write_scene_code(project_id: str, code: str) -> Path:
@@ -317,6 +320,13 @@ def apply_script(project_id: str, body: ScriptRequest):
 
 
 TEMPLATE_PATH = MANIM_ROOT / "platform" / "assets" / "beat-script-template.md"
+
+
+@app.get("/api/beat-types")
+def get_beat_types():
+    from beat_types import list_beat_types  # noqa: E402
+
+    return {"beat_types": list_beat_types()}
 
 
 @app.get("/api/beat-script-template")

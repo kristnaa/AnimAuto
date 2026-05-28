@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/codeeditor.tsx","./src/api.ts","./src/main.tsx","./src/samplescript.ts","./src/vite-env.d.ts"],"version":"5.6.3"}
+{"root":["./src/app.tsx","./src/codeeditor.tsx","./src/api.ts","./src/main.tsx","./src/samplescript.ts","./src/vite-env.d.ts","./src/components/beattypepicker.tsx","./src/components/layoutpreview.tsx"],"version":"5.6.3"}

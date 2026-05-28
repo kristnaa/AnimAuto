@@ -10,7 +10,18 @@ from manim import *
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "animations"))
 
-from beat_helpers import BeatScene, MovingBeatScene  # noqa: E402
+from beat_helpers import (  # noqa: E402
+    BeatScene,
+    MovingBeatScene,
+    CODE_BORDER,
+    CODE_ERROR_HIGHLIGHT,
+    CODE_ERROR_HIGHLIGHT_OPACITY,
+    CODE_HIGHLIGHT_OPACITY,
+    CODE_RUN_GREEN,
+    normalize_code_lines,
+    sanitize_code_demo_beat,
+)
+from beat_types import CODE_DEMO, COMPARE, LIST, apply_type_defaults, normalize_beat_type  # noqa: E402
 from icon_grid import layout_icons_in_panel  # noqa: E402
 from icon_triggers import line_has_trigger, resolve_icon_reveal_mode  # noqa: E402
 from visual_library import load_visual  # noqa: E402
@@ -32,11 +43,24 @@ def _normalize_text(text: str) -> str:
 
 
 def _word_in_text(text_mob, word: str) -> bool:
+    text_mob = _line_text_mob(text_mob)
     text = text_mob.text if hasattr(text_mob, "text") else str(text_mob)
     return _normalize_text(word) in _normalize_text(text) or word in text
 
 
+def _line_text_mob(line_mob):
+    """Body Text submob for a code row (indent + body VGroup or plain line)."""
+    if hasattr(line_mob, "text"):
+        return line_mob
+    if isinstance(line_mob, VGroup):
+        for sub in line_mob.submobjects:
+            if hasattr(sub, "text") and str(sub.text).strip():
+                return sub
+    return line_mob
+
+
 def _find_word(mob, word: str):
+    mob = _line_text_mob(mob)
     text = mob.text
     compact_word = _normalize_text(word)
     start = text.find(compact_word)
@@ -196,9 +220,231 @@ def _begin_beat(scene: BeatScene, use_camera: bool) -> None:
             scene.cam_restore(run_time=0.35)
 
 
-def run_beat_from_spec(scene: BeatScene, beat: dict, *, use_camera: bool = False) -> None:
-    beat = resolve_beat_visuals(dict(beat))
-    _begin_beat(scene, use_camera)
+def run_code_demo_beat(scene: BeatScene, beat: dict, *, use_camera: bool = False) -> None:
+    """Label + dark code window: run click → line-by-line highlight → output or error."""
+    beat = sanitize_code_demo_beat(beat)
+    label_text = beat.get("label", "Run code")
+    label = scene.top_label(label_text)
+    cam_on = _beat_uses_camera(beat, use_camera)
+    has_camera_spec = bool(beat.get("camera"))
+
+    code_lines = normalize_code_lines(beat.get("code_lines") or ['print("Hello, World!")'])
+    output_text = beat.get("code_output", "")
+    result = (beat.get("code_result") or "success").lower()
+    success = result != "error"
+    error_line = beat.get("code_error_line")
+    if error_line is not None:
+        error_line = int(error_line)
+    elif not success:
+        error_line = len(code_lines)
+
+    scene.type_text(label, time_per_char=0.045, cursor_color=YELLOW)
+
+    terminal, card, split_y, _, code_area_top, run_btn, title_bar = scene.empty_code_terminal_card(label)
+    scene.play(GrowFromCenter(terminal), run_time=0.45)
+    output_panel = terminal[2]
+
+    pad_x = 0.38
+    editor = scene.prepare_code_editor(
+        card,
+        split_y,
+        title_bar=title_bar,
+        output_panel=output_panel,
+        pad_x=pad_x,
+        code_area_top=code_area_top,
+    )
+    code_group = editor["code_group"]
+    viewport_masks = scene.create_code_viewport_masks(card, title_bar, split_y)
+    scene.add(code_group, viewport_masks)
+    code_group.set_z_index(1)
+    viewport_masks.set_z_index(3)
+    scene.bring_code_chrome_to_front(terminal, run_btn, label)
+    scene.wait(0.2)
+
+    scene.play(Circumscribe(run_btn, color=WHITE, fade_out=True, time_width=0.4), run_time=0.32)
+    scene.animate_run_button_click(run_btn)
+    if has_camera_spec:
+        _run_camera(scene, beat, "after_run", label=label, card=card)
+    elif cam_on and isinstance(scene, MovingBeatScene):
+        scene.cam_focus_card(card, run_time=0.85)
+
+    active_highlight = None
+    stopped_on_error = False
+    output_shown = False
+    line_rows: list = []
+    output_body = None
+
+    for raw in code_lines:
+        is_blank = not str(raw).strip()
+        row = scene.reveal_code_line(editor, raw, type_body=not is_blank)
+        line_rows.append(row)
+
+    scene.bring_code_chrome_to_front(terminal, run_btn, label)
+    scene.scroll_code_editor_home(editor, run_time=0.5)
+    scene.wait(0.3)
+
+    for i, raw in enumerate(code_lines):
+        row = line_rows[i]
+        if not str(raw).strip():
+            continue
+
+        if active_highlight is not None:
+            scene.remove(active_highlight)
+            active_highlight = None
+
+        scene.scroll_code_editor_to_line(editor, row, run_time=0.22)
+        scene.wait(0.05)
+
+        is_error = not success and (i + 1) == error_line
+        target_opacity = CODE_ERROR_HIGHLIGHT_OPACITY if is_error else CODE_HIGHLIGHT_OPACITY
+        hl = scene.code_line_highlight(row, error=is_error)
+        hl.set_fill_opacity(0)
+        active_highlight = hl
+        scene.place_code_line_highlight(row, hl)
+        scene.play(hl.animate.set_fill_opacity(target_opacity), run_time=0.1)
+        scene.wait(0.12)
+
+        hook = f"after_line_{i + 1}"
+        if has_camera_spec:
+            _run_camera(scene, beat, hook, label=label, card=card)
+        elif cam_on and i == 0 and isinstance(scene, MovingBeatScene):
+            scene.cam_focus_card(card, run_time=0.75)
+
+        if is_error:
+            stopped_on_error = True
+            scene.play(
+                hl.animate.set_fill(CODE_ERROR_HIGHLIGHT).set_fill_opacity(CODE_ERROR_HIGHLIGHT_OPACITY + 0.12),
+                run_time=0.1,
+            )
+            error_display = beat.get("code_error_message") or output_text or "Error"
+            scene.clear_code_from_output_zone(editor, output_panel)
+            output_group, output_body = scene.present_code_output(
+                error_display,
+                card,
+                split_y,
+                success=False,
+                type_error=True,
+            )
+            output_group.set_z_index(11)
+            scene.bring_code_chrome_to_front(terminal, run_btn, label, output_group)
+            scene.fast_shake(terminal)
+            scene.play(Wiggle(output_body), run_time=0.35)
+            output_shown = True
+            break
+
+        scene.play(hl.animate.set_fill_opacity(0), run_time=0.1)
+        scene.remove(hl)
+        active_highlight = None
+
+    if active_highlight is not None and not stopped_on_error:
+        scene.play(active_highlight.animate.set_fill_opacity(0), run_time=0.08)
+        scene.remove(active_highlight)
+
+    if has_camera_spec:
+        _run_camera(scene, beat, "after_code", label=label, card=card)
+    elif cam_on and isinstance(scene, MovingBeatScene):
+        scene.cam_focus_card(card, run_time=0.85)
+
+    if success:
+        display = output_text or "Ran successfully"
+        scene.clear_code_from_output_zone(editor, output_panel)
+        output_group, output_body = scene.present_code_output(
+            display,
+            card,
+            split_y,
+            success=True,
+        )
+        output_group.set_z_index(11)
+        scene.bring_code_chrome_to_front(terminal, run_btn, label, output_group)
+    elif not output_shown:
+        display = beat.get("code_error_message") or output_text or "Error"
+        scene.clear_code_from_output_zone(editor, output_panel)
+        output_group, output_body = scene.present_code_output(
+            display,
+            card,
+            split_y,
+            success=False,
+            type_error=True,
+        )
+        output_group.set_z_index(11)
+        scene.bring_code_chrome_to_front(terminal, run_btn, label, output_group)
+        scene.play(Wiggle(output_body), run_time=0.35)
+    else:
+        scene.bring_code_chrome_to_front(terminal, run_btn, label)
+
+    if has_camera_spec:
+        _run_camera(scene, beat, "after_output", label=label, card=card)
+
+    for em in beat.get("emphasis") or []:
+        word = em.get("word")
+        if not word:
+            continue
+        for line_mob in line_rows:
+            if _word_in_text(line_mob, word):
+                part = _find_word(line_mob, word)
+                if em.get("color") == "RED":
+                    _apply_word_color(line_mob, word, RED)
+                if em.get("animation") == "wiggle":
+                    scene.play(Wiggle(part), run_time=0.55)
+                elif em.get("animation") == "indicate":
+                    scene.play(Indicate(part, color=YELLOW), run_time=0.5)
+
+    scene.wait(float(beat.get("hold", 1.5)))
+
+    if has_camera_spec:
+        _run_camera(scene, beat, "exit", label=label, card=card)
+    elif cam_on and isinstance(scene, MovingBeatScene):
+        scene.cam_restore(run_time=0.7)
+
+    scene.sweep_foreground(run_time=0.55)
+
+
+def run_compare_beat(scene: BeatScene, beat: dict, *, use_camera: bool = False) -> None:
+    """Dual card layout — left vs right comparison."""
+    label_text = beat.get("label", "Compare")
+    label = scene.top_label(label_text)
+    cam_on = _beat_uses_camera(beat, use_camera)
+    has_camera_spec = bool(beat.get("camera"))
+
+    left_lines = beat.get("left_lines") or beat.get("card_lines") or ["Before"]
+    right_lines = beat.get("right_lines") or beat.get("bg_lines") or ["After"]
+
+    left_card = scene.empty_card(side="left", label=label)
+    right_card = scene.empty_card(side="right", label=label)
+
+    scene.type_text(label, time_per_char=0.045, cursor_color=YELLOW)
+    scene.play(GrowFromCenter(left_card), GrowFromCenter(right_card), run_time=0.4)
+
+    left_group = scene.card_text_in(left_card, *left_lines)
+    right_group = scene.card_text_in(right_card, *right_lines)
+
+    for i, line in enumerate(left_group):
+        scene.type_text(line, time_per_char=0.05)
+        if has_camera_spec:
+            _run_camera(scene, beat, "after_line_1" if i == 0 else f"after_line_{i + 1}", label=label, card=left_card, card_side="left")
+        elif cam_on and i == 0 and isinstance(scene, MovingBeatScene):
+            scene.cam_focus_left(label, run_time=0.85)
+
+    for i, line in enumerate(right_group):
+        scene.type_text(line, time_per_char=0.05)
+        hook = "after_line_2" if i == 0 else f"after_line_{len(left_group) + i + 1}"
+        if has_camera_spec:
+            _run_camera(scene, beat, hook, label=label, card=right_card, card_side="right")
+        elif cam_on and i == 0 and isinstance(scene, MovingBeatScene):
+            scene.cam_focus_right(label, run_time=0.85)
+
+    scene.wait(float(beat.get("hold", 1.2)))
+
+    if has_camera_spec:
+        _run_camera(scene, beat, "exit", label=label, card=right_card)
+    elif cam_on and isinstance(scene, MovingBeatScene):
+        scene.cam_restore(run_time=0.7)
+
+    scene.sweep_foreground(run_time=0.55)
+
+
+def run_panel_beat(scene: BeatScene, beat: dict, *, use_camera: bool = False) -> None:
+    """Standard card/icon panel beat (statement, question, joke, list, recap, explain)."""
     layout = beat.get("layout", "card_right_icon_left")
     label_text = beat.get("label", "Beat")
     label = scene.top_label(label_text)
@@ -210,7 +456,7 @@ def run_beat_from_spec(scene: BeatScene, beat: dict, *, use_camera: bool = False
     bg_lines_mobs = None
     punchline_mob = None
 
-    has_card = "card" in layout or beat.get("card_lines")
+    has_card = "card" in layout or beat.get("card_lines") or beat.get("list_lines")
     card_side = _card_side(layout, beat)
     icon_side = _icon_side(layout)
 
@@ -219,18 +465,28 @@ def run_beat_from_spec(scene: BeatScene, beat: dict, *, use_camera: bool = False
     if has_card and not card_lines and beat.get("bg_lines"):
         card_lines = beat["bg_lines"]
 
-    if has_card and card_lines:
+    beat_type = normalize_beat_type(beat.get("type"))
+    list_lines = beat.get("list_lines")
+
+    if has_card and (card_lines or list_lines):
         card = scene.empty_card(
             side=card_side,
             width=float(beat.get("card_width", 5.6)),
             height=float(beat.get("card_height", 5.0)),
             label=label,
         )
-        all_lines = list(card_lines)
+        all_lines = list(list_lines or card_lines or [])
         if beat.get("punchline_line") and beat["punchline_line"] not in all_lines:
             all_lines.append(beat["punchline_line"])
 
-        lines_group = scene.card_lines(*all_lines, max_width=card.width - 2 * 0.45)
+        if beat_type == LIST or list_lines:
+            source = list_lines or all_lines
+            lines_group = scene.list_lines_group(*source, max_width=card.width - 2 * 0.45)
+            for row in lines_group:
+                row[1].set_opacity(0)
+        else:
+            lines_group = scene.card_lines(*all_lines, max_width=card.width - 2 * 0.45)
+
         scene.place_card_content(lines_group, card)
 
         punchline = beat.get("punchline_line")
@@ -279,7 +535,10 @@ def run_beat_from_spec(scene: BeatScene, beat: dict, *, use_camera: bool = False
         if has_camera_spec:
             _run_camera(scene, beat, "after_icon", label=label, card=card, card_side=card_side)
         elif cam_on:
-            _cam_focus_icon(scene, label, icon_side)
+            if beat_type == LIST and card is not None and isinstance(scene, MovingBeatScene):
+                scene.cam_focus_card(card, run_time=0.85)
+            else:
+                _cam_focus_icon(scene, label, icon_side)
         scene.wait(0.4)
 
     if card:
@@ -287,9 +546,15 @@ def run_beat_from_spec(scene: BeatScene, beat: dict, *, use_camera: bool = False
 
     trigger_words = list(trigger_map.keys())
     typed: list = []
+    is_list_beat = beat_type == LIST or bool(list_lines)
     if card_lines_mobs:
         for i, line in enumerate(card_lines_mobs):
-            if trigger_map and line_has_trigger(line.text, trigger_words):
+            if is_list_beat and isinstance(line, VGroup) and len(line) >= 2:
+                check, text = line[0], line[1]
+                scene.play(FadeIn(check, scale=1.1), run_time=0.25)
+                scene.type_text(text, time_per_char=0.05)
+                typed.append(line)
+            elif trigger_map and line_has_trigger(line.text, trigger_words):
                 revealed_words = scene.type_line_with_icon_triggers(
                     line,
                     trigger_map,
@@ -313,9 +578,12 @@ def run_beat_from_spec(scene: BeatScene, beat: dict, *, use_camera: bool = False
             hook = f"after_line_{i + 1}"
             if has_camera_spec:
                 _run_camera(scene, beat, hook, label=label, card=card, card_side=card_side)
-            elif cam_on and i == 1 and isinstance(scene, MovingBeatScene):
-                fn = scene.cam_focus_right if card_side == "right" else scene.cam_focus_left
-                fn(label, run_time=0.9)
+            elif cam_on and card is not None and isinstance(scene, MovingBeatScene):
+                if beat_type == LIST:
+                    scene.cam_focus_card(card, run_time=0.85)
+                elif i == 1:
+                    fn = scene.cam_focus_right if card_side == "right" else scene.cam_focus_left
+                    fn(label, run_time=0.9)
 
     if bg_lines_mobs is not None:
         for i, line in enumerate(bg_lines_mobs):
@@ -349,7 +617,10 @@ def run_beat_from_spec(scene: BeatScene, beat: dict, *, use_camera: bool = False
         if has_camera_spec:
             _run_camera(scene, beat, "after_icon", label=label, card=card, card_side=card_side)
         elif cam_on:
-            _cam_focus_icon(scene, label, icon_side)
+            if beat_type == LIST and card is not None and isinstance(scene, MovingBeatScene):
+                scene.cam_focus_card(card, run_time=0.85)
+            else:
+                _cam_focus_icon(scene, label, icon_side)
     elif use_word_sync and has_icon_triggers:
         still_hidden = [
             m
@@ -404,6 +675,22 @@ def run_beat_from_spec(scene: BeatScene, beat: dict, *, use_camera: bool = False
 
     # One unified fade: card, card text, icons, and detached emphasis slices together.
     scene.sweep_foreground(run_time=0.55)
+
+
+def run_beat_from_spec(scene: BeatScene, beat: dict, *, use_camera: bool = False) -> None:
+    beat = apply_type_defaults(resolve_beat_visuals(dict(beat)))
+    _begin_beat(scene, use_camera)
+    beat_type = normalize_beat_type(beat.get("type"))
+    layout = beat.get("layout", "")
+
+    if beat_type == CODE_DEMO or layout in ("code_full_card", "code_in_card", "code_left_card_right"):
+        run_code_demo_beat(scene, beat, use_camera=use_camera)
+        return
+    if beat_type == COMPARE or layout == "dual_card":
+        run_compare_beat(scene, beat, use_camera=use_camera)
+        return
+
+    run_panel_beat(scene, beat, use_camera=use_camera)
 
 
 def make_scene_class(project: dict, use_camera: bool = False):

@@ -19,12 +19,14 @@ import {
   ChatMessage,
   Project,
   Snapshot,
+  BeatTypeMeta,
   beatScriptTemplateDownloadUrl,
   createProject,
   downloadUrl,
   exportHd,
   formatPython,
   getBeatScriptTemplate,
+  getBeatTypes,
   getProjectCode,
   health,
   lintPython,
@@ -38,15 +40,33 @@ import {
   submitScript,
 } from "./api";
 import { CodeEditor } from "./CodeEditor";
+import { BeatTypePicker } from "./components/BeatTypePicker";
+import { LayoutPreview } from "./components/LayoutPreview";
 
 type PanelMode = "chat" | "script";
 type PreviewView = "video" | "code";
+
+function detectScriptBeatType(script: string): string | null {
+  const blocks = script.split(/^###\s*BEAT/m).slice(1);
+  const target = blocks[blocks.length - 1] ?? script;
+  const m = target.match(/^TYPE:\s*(.+)$/im);
+  return m?.[1]?.trim().toLowerCase().replace(/\s+/g, "_") ?? null;
+}
+
+function nextBeatNumber(script: string): number {
+  const matches = script.match(/^###\s*BEAT\s*(\d+)/gim);
+  if (!matches?.length) return 1;
+  const nums = matches.map((line) => parseInt(line.replace(/\D/g, ""), 10));
+  return Math.max(...nums) + 1;
+}
 
 export default function App() {
   const [project, setProject] = useState<Project | null>(null);
   const [mode, setMode] = useState<PanelMode>("chat");
   const [input, setInput] = useState("");
   const [script, setScript] = useState("");
+  const [beatTypes, setBeatTypes] = useState<BeatTypeMeta[]>([]);
+  const [selectedBeatTypeId, setSelectedBeatTypeId] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [codeCustomized, setCodeCustomized] = useState(false);
   const [useAiParse, setUseAiParse] = useState(false);
@@ -73,7 +93,27 @@ export default function App() {
     createProject("My Animation")
       .then(setProject)
       .catch((e) => setError(String(e)));
+    getBeatTypes()
+      .then((res) => {
+        setBeatTypes(res.beat_types);
+        if (res.beat_types.length) {
+          setSelectedBeatTypeId(res.beat_types[0].id);
+        }
+      })
+      .catch(() => setBeatTypes([]));
   }, []);
+
+  useEffect(() => {
+    const detected = detectScriptBeatType(script);
+    if (!detected || !beatTypes.length) return;
+    const match = beatTypes.find(
+      (b) =>
+        b.id === detected ||
+        b.id === detected.replace(/-/g, "_") ||
+        b.label.toLowerCase().replace(/\s+/g, "_") === detected
+    );
+    if (match) setSelectedBeatTypeId(match.id);
+  }, [script, beatTypes]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -216,6 +256,30 @@ export default function App() {
       setError(e instanceof Error ? e.message : String(e));
     }
   };
+
+  const resolveBeatTypeMeta = (typeId: string | undefined) => {
+    if (!typeId || !beatTypes.length) return undefined;
+    const norm = typeId.toLowerCase().replace(/\s+/g, "_").replace(/-/g, "_");
+    return beatTypes.find(
+      (b) =>
+        b.id === norm ||
+        b.id.replace(/_/g, "") === norm.replace(/_/g, "") ||
+        b.label.toLowerCase().replace(/\s+/g, "_") === norm
+    );
+  };
+
+  const handleInsertBeatTemplate = (bt: BeatTypeMeta) => {
+    const n = nextBeatNumber(script);
+    const slug = bt.id.replace(/_/g, "_");
+    let tpl = bt.script_template.replace(/BEAT N/g, `BEAT ${n}`).replace(/slug_name/g, slug);
+    const prefix = script.trim() ? "\n\n" : "";
+    setScript((s) => s + prefix + tpl);
+    setSelectedBeatTypeId(bt.id);
+  };
+
+  const previewBeatType =
+    resolveBeatTypeMeta(detectScriptBeatType(script) ?? undefined) ??
+    resolveBeatTypeMeta(selectedBeatTypeId ?? undefined);
 
   const handleCodeFormat = async () => {
     if (!code.trim()) return;
@@ -454,10 +518,18 @@ export default function App() {
             </>
           ) : mode === "script" ? (
             <div className="script-panel">
+              {beatTypes.length > 0 && (
+                <BeatTypePicker
+                  beatTypes={beatTypes}
+                  selectedId={selectedBeatTypeId}
+                  onSelect={(bt) => setSelectedBeatTypeId(bt.id)}
+                  onInsertTemplate={handleInsertBeatTemplate}
+                />
+              )}
               <div className="script-toolbar">
                 <p className="script-hint">
                   Copy the template, fill one <code>### BEAT</code> block per idea.
-                  Icons: describe + color — GPT picks Iconify on Generate.
+                  Pick a beat type for live layout preview — output is authored, not executed.
                 </p>
                 <div className="script-toolbar-btns">
                   <button
@@ -655,17 +727,39 @@ export default function App() {
               {project && project.beats.length > 0 && (
                 <div className="beats-list">
                   <div className="beats-title">Beats</div>
-                  {project.beats.map((b, i) => (
-                    <div key={i} className="beat-card">
-                      <div className="beat-num">{i + 1}</div>
-                      <div>
-                        <div className="beat-label">{b.label}</div>
-                        <div className="beat-meta">
-                          {b.type} · {b.layout}
+                  {project.beats.map((b, i) => {
+                    const meta = resolveBeatTypeMeta(b.type);
+                    return (
+                      <div key={i} className="beat-card">
+                        <div className="beat-num">{i + 1}</div>
+                        <div className="beat-card-body">
+                          <div className="beat-label">{b.label}</div>
+                          <div className="beat-meta">
+                            {b.type} · {b.layout}
+                          </div>
                         </div>
+                        {meta && (
+                          <LayoutPreview
+                            title={meta.label}
+                            layout={b.layout || meta.layout}
+                            regions={meta.regions}
+                            compact
+                          />
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
+                </div>
+              )}
+              {mode === "script" && previewBeatType && (
+                <div className="preview-layout-strip">
+                  <span className="preview-layout-label">Live layout</span>
+                  <LayoutPreview
+                    title={previewBeatType.label}
+                    layout={previewBeatType.layout}
+                    regions={previewBeatType.regions}
+                    compact
+                  />
                 </div>
               )}
             </>

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any
 
 from openai import OpenAI
@@ -13,6 +14,12 @@ from app.skill_context import (
     build_chat_system_prompt,
     build_script_system_prompt,
     normalize_project,
+)
+
+_CODE_DEMO_INTENT = re.compile(
+    r"code\s*demo|write\s+(?:a\s+)?function|python\s+function|run\s+code|"
+    r"add(?:ing)?\s+\d+\s+number|show\s+(?:me\s+)?code|snippet",
+    re.I,
 )
 
 
@@ -42,6 +49,19 @@ class OpenAIService:
 
         for msg in chat_history or []:
             messages.append({"role": msg["role"], "content": msg["content"]})
+
+        if _CODE_DEMO_INTENT.search(user_message):
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "This request needs a code_demo beat: set type to code_demo, "
+                        "layout to code_full_card, populate code_lines (Python source lines), "
+                        "code_result (success or error), and code_output (stdout text). "
+                        "Do not use card_lines for code."
+                    ),
+                }
+            )
 
         messages.append({"role": "user", "content": user_message})
 

@@ -10,6 +10,30 @@ export interface Beat {
   card_lines?: string[];
   bg_lines?: string[];
   punchline_line?: string;
+  code_lines?: string[];
+  code_output?: string;
+  code_result?: string;
+  list_lines?: string[];
+}
+
+export interface BeatTypeRegion {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  kind: string;
+}
+
+export interface BeatTypeMeta {
+  id: string;
+  label: string;
+  description: string;
+  layout: string;
+  visuals: string[];
+  regions: BeatTypeRegion[];
+  script_template: string;
 }
 
 export interface Project {
@@ -138,6 +162,10 @@ export async function exportHd(
 
 export function downloadUrl(projectId: string) {
   return `${API}/projects/${projectId}/download`;
+}
+
+export async function getBeatTypes() {
+  return json<{ beat_types: BeatTypeMeta[] }>(`${API}/beat-types`);
 }
 
 export async function getBeatScriptTemplate() {

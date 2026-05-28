@@ -85,29 +85,46 @@ CHAT_OUTPUT_SCHEMA = """Return ONLY valid JSON (no markdown fences):
     "use_camera": true,
     "beats": [
       {
-        "label": "Yellow top heading",
-        "type": "statement" | "question" | "joke punchline" | "explain" | "recap",
-        "layout": "card_right_icon_left" | "card_left_icon_right" | "text_right_icon_left" | "text_left_icon_right",
+        "label": "Short yellow heading (one line only)",
+        "type": "statement" | "question" | "joke punchline" | "explain" | "recap" | "code_demo" | "list" | "compare",
+        "layout": "card_right_icon_left" | "card_left_icon_right" | "text_right_icon_left" | "text_left_icon_right" | "code_full_card" | "dual_card",
         "use_camera": true,
-        "card_lines": ["line1", "line2"],
-        "punchline_line": "optional — last joke line, separate from card_lines",
-        "bg_lines": ["for text_right_icon_left — white text on orange, no card"],
+        "card_lines": ["for statement/joke/explain — NOT for code_demo"],
+        "punchline_line": "optional joke last line",
+        "bg_lines": ["for text_right_icon_left questions"],
+        "list_lines": ["checklist item one", "item two"],
+        "left_lines": ["compare left card"],
+        "right_lines": ["compare right card"],
+        "code_language": "python",
+        "code_lines": ["def add(a, b):", "    return a + b", "print(add(2, 3))"],
+        "code_result": "success" | "error",
+        "code_output": "5",
+        "code_error_line": 2,
+        "code_error_message": "NameError: ...",
         "card_width": 5.6,
         "card_height": 5.0,
-        "card_side": "right" | "left",
-        "hold": 1.2,
+        "hold": 1.5,
         "visuals": {
-          "primary": {"concept": "python", "role": "subject", "description": "Python programming language brand logo", "color": "#3776AB"},
-          "swap": {"concept": "frustration", "role": "punchline", "trigger": "screaming", "description": "screaming panicked emoji face", "color": "WHITE"}
+          "primary": {"concept": "python", "role": "subject", "description": "...", "color": "WHITE"}
         },
-        "emphasis": [{"word": "screaming", "color": "RED", "animation": "wiggle|indicate"}],
+        "emphasis": [{"word": "word", "color": "RED", "animation": "wiggle"}],
         "camera": [
-          {"hook": "after_line_1|after_line_2|after_icon|punchline|exit", "action": "cam_focus_left|cam_focus_right|cam_focus_card|cam_restore", "run_time": 0.9}
+          {"hook": "after_run|after_line_1|after_line_2|after_code|after_output|after_icon|punchline|exit", "action": "cam_focus_card|cam_focus_left|cam_focus_right|cam_restore", "run_time": 0.9}
         ]
       }
     ]
   }
-}"""
+}
+
+For code_demo beats you MUST set:
+- type: "code_demo"
+- layout: "code_full_card"
+- code_lines: array of source lines (strings with proper Python syntax)
+- code_result: "success" or "error"
+- code_output: expected stdout on success
+- code_error_line + code_error_message: only when code_result is "error"
+- Do NOT use card_lines for code — only code_lines
+- visuals optional (empty {} is fine for code_demo)"""
 
 
 SCRIPT_OUTPUT_SCHEMA = """Return ONLY valid JSON (no markdown fences). Prefer script_markdown:
@@ -125,6 +142,9 @@ script_markdown MUST be a complete beat script using:
 - TYPE, LAYOUT, CAMERA, DURATION per beat
 - ─── TIMELINE ─── table (anim_type, anim_grow_card, cam_* hooks)
 - ─── CONTENT ─── with LABEL, TEXT (card) or TEXT (white, on BG)
+- ─── CODE ─── for code_demo beats: language, result (success|error), output, error_line (1-based, for error beats), error/error_message (traceback text), lines (indented code). No real execution — LLM or user authors output and which line fails.
+- LIST (card, checks): for checklist beats
+- TEXT (left card) / TEXT (right card): for compare beats
 - ─── ICONS ─── with icon_id: plain English description | color: WHITE|#hex [| scale: 1.2]
 - GPT resolves descriptions to Iconify refs at Generate time — do NOT require prefix:name in scripts unless user provides them.
 - ─── CARD ─── SIDE and SIZE when using a card
@@ -151,14 +171,17 @@ Follow the authoring knowledge below exactly — same rules as our Cursor manim-
 
 ## Critical rules
 - Split narration into ~1-idea beats (~5–8s each). Use CLEAR storytelling when structure is unclear.
+- **When user asks to write/run/show code, use a function, code demo, or Python snippet → type MUST be code_demo, layout code_full_card, with code_lines + code_output + code_result. Never put code in card_lines.**
 - card_right_icon_left: statements with white card on right, icon/visual on left.
 - text_right_icon_left: questions — no card, white text on orange right half.
 - joke punchline: card_lines = setup lines; punchline_line = final line; swap visual + RED wiggle emphasis on trigger word.
+- code_demo: dark code window, run button, line-by-line highlight, then output panel. Author realistic code_output (e.g. add(2,3) → "5").
+- list: list_lines + optional icon; cam_focus_card hooks.
+- compare: dual_card with left_lines and right_lines.
 - use_camera: true + camera[] when episode uses moving camera; always cam_restore on hook "exit".
-- ICONS lines use plain descriptions + color — GPT resolves Iconify refs on Generate.
-- visuals.primary and visuals.swap must be objects — never arrays.
+- visuals.primary and visuals.swap must be objects — never arrays. code_demo may omit visuals.
 - emphasis entries must be objects {{"word", "color", "animation"}}.
-- Keep card_lines short (~8 words max per line). Progressive reveal: label → empty card → type lines → icon → punchline.
+- label must be ONE short line (never include LIST/CODE sections in label).
 - If user asks to tweak, change only what they asked; preserve other beats.
 """
 
@@ -231,6 +254,39 @@ def normalize_beat(beat: dict) -> dict:
     camera = beat.get("camera")
     if isinstance(camera, list):
         out["camera"] = [_as_dict(step) for step in camera if _as_dict(step)]
+
+    # Coerce code_lines from a single string if model returned wrong shape
+    code_lines = out.get("code_lines")
+    try:
+        from beat_helpers import normalize_code_lines  # noqa: WPS433
+    except ImportError:
+        def normalize_code_lines(lines):  # type: ignore[misc]
+            if not lines:
+                return []
+            return [str(ln).expandtabs(4).rstrip() for ln in lines]
+
+    if isinstance(code_lines, str):
+        out["code_lines"] = normalize_code_lines(code_lines.splitlines())
+    elif isinstance(code_lines, list):
+        out["code_lines"] = normalize_code_lines(code_lines)
+
+    if out.get("type") == "code_demo" or out.get("code_lines"):
+        try:
+            from beat_helpers import sanitize_code_demo_beat  # noqa: WPS433
+
+            out = sanitize_code_demo_beat(out)
+        except ImportError:
+            pass
+
+    try:
+        from beat_types import apply_type_defaults, normalize_beat_type  # noqa: WPS433
+
+        out["type"] = normalize_beat_type(out.get("type"))
+        if out.get("code_lines") and out["type"] not in ("code_demo",):
+            out["type"] = "code_demo"
+        out = apply_type_defaults(out)
+    except ImportError:
+        pass
 
     return out
 

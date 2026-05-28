@@ -72,6 +72,9 @@ HOOK_ALIASES = {
     "after_line_3": "after_line_3",
     "after_icon": "after_icon",
     "after_primary_icon": "after_icon",
+    "after_code": "after_code",
+    "after_output": "after_output",
+    "after_run": "after_run",
     "punchline": "punchline",
     "before_punchline": "punchline",
     "exit": "exit",
@@ -81,6 +84,26 @@ HOOK_ALIASES = {
 
 def _strip(s: str) -> str:
     return s.strip()
+
+
+def _leading_indent(line: str) -> int:
+    expanded = line.expandtabs(4)
+    return len(expanded) - len(expanded.lstrip(" "))
+
+
+def _dedent_code_block(raw: str) -> list[str]:
+    """Parse indented code block under `lines:` — keep relative indentation."""
+    lines = [ln.expandtabs(4).rstrip() for ln in raw.splitlines()]
+    lines = [ln for ln in lines if ln.strip()]
+    if not lines:
+        return []
+    min_indent = min(_leading_indent(ln) for ln in lines)
+    return [ln[min_indent:] for ln in lines]
+
+
+def _preserve_code_line(line: str) -> str:
+    """Keep leading indentation; only strip trailing whitespace."""
+    return line.expandtabs(4).rstrip()
 
 
 def _parse_meta_header(text: str) -> dict[str, Any]:
@@ -102,6 +125,93 @@ def _parse_meta_header(text: str) -> dict[str, Any]:
         meta["name"] = _strip(name.group(1))
 
     return meta
+
+
+def _parse_code_section(block: str, beat: dict) -> None:
+    code_m = re.search(r"─── CODE ───\s*\n(.+?)(?=\n───|\nHOLD|\Z)", block, re.S | re.I)
+    if not code_m:
+        return
+    section = code_m.group(1)
+    lang = re.search(r"^language:\s*(.+)$", section, re.M | re.I)
+    if lang:
+        beat["code_language"] = _strip(lang.group(1))
+
+    result = re.search(r"^result:\s*(success|error)\s*$", section, re.M | re.I)
+    if result:
+        beat["code_result"] = result.group(1).lower()
+
+    err_line = re.search(r"^error_line:\s*(\d+)\s*$", section, re.M | re.I)
+    if err_line:
+        beat["code_error_line"] = int(err_line.group(1))
+
+    err_msg = re.search(r"^error(?:_message)?:\s*\|\s*\n((?:[ \t].*\n?)*)", section, re.M | re.I)
+    if err_msg:
+        beat["code_error_message"] = "\n".join(
+            ln.strip() for ln in err_msg.group(1).splitlines() if ln.strip()
+        )
+    else:
+        err_inline = re.search(r"^error(?:_message)?:\s*(.+)$", section, re.M | re.I)
+        if err_inline:
+            beat["code_error_message"] = _strip(err_inline.group(1))
+
+    output = re.search(r"^output:\s*\|\s*\n((?:[ \t].*\n?)*)", section, re.M | re.I)
+    if output:
+        beat["code_output"] = "\n".join(
+            ln.strip() for ln in output.group(1).splitlines() if ln.strip()
+        )
+    else:
+        output_inline = re.search(r"^output:\s*(.+)$", section, re.M | re.I)
+        if output_inline:
+            beat["code_output"] = _strip(output_inline.group(1))
+
+    lines_block = re.search(r"^lines:\s*\n((?:[ \t].*\n?)*)", section, re.M | re.I)
+    if lines_block:
+        beat["code_lines"] = _dedent_code_block(lines_block.group(1))
+    else:
+        bare: list[str] = []
+        for line in section.splitlines():
+            line = line.rstrip()
+            if not line.strip():
+                continue
+            if re.match(r"^(language|result|output|error|error_line|error_message|lines):", line, re.I):
+                break
+            bare.append(_preserve_code_line(line))
+        if bare:
+            beat["code_lines"] = bare
+
+
+def _parse_list_section(block: str, beat: dict) -> None:
+    list_m = re.search(
+        r"LIST\s*\(card[^)]*\):\s*\n([\s\S]+?)(?=\n───|\nTEXT|\nBG TEXT|\nICONS|\nHOLD|$)",
+        block,
+        re.I,
+    )
+    if not list_m:
+        return
+    lines = [_strip(l) for l in list_m.group(1).splitlines() if _strip(l)]
+    if lines:
+        beat["list_lines"] = lines
+        beat.setdefault("type", "list")
+
+
+def _parse_compare_sections(block: str, beat: dict) -> None:
+    left_m = re.search(
+        r"TEXT\s*\(left\s*card[^)]*\):\s*\n(.+?)(?=\n(?:TEXT|───|HOLD|\Z))",
+        block,
+        re.S | re.I,
+    )
+    right_m = re.search(
+        r"TEXT\s*\(right\s*card[^)]*\):\s*\n(.+?)(?=\n(?:───|HOLD|\Z))",
+        block,
+        re.S | re.I,
+    )
+    if left_m:
+        beat["left_lines"] = [_strip(l) for l in left_m.group(1).splitlines() if _strip(l)]
+    if right_m:
+        beat["right_lines"] = [_strip(l) for l in right_m.group(1).splitlines() if _strip(l)]
+    if beat.get("left_lines") or beat.get("right_lines"):
+        beat.setdefault("type", "compare")
+        beat.setdefault("layout", "dual_card")
 
 
 def _parse_card_section(block: str, beat: dict) -> None:
@@ -180,6 +290,36 @@ def _parse_camera_section(block: str, beat: dict) -> None:
         beat["camera"] = steps
 
 
+_LABEL_STOP = (
+    r"TEXT|BG TEXT|LIST\s*\(|CODE|ICONS|CARD|EMPHASIS|CAMERA|HOLD|───"
+)
+
+
+def _parse_label(block: str, beat: dict) -> None:
+    label_m = re.search(
+        rf"(?:─── CONTENT ───\s*\n)?LABEL:\s*\n(.+?)(?=\n\n|\n(?:{_LABEL_STOP})|\Z)",
+        block,
+        re.S | re.I,
+    )
+    if not label_m:
+        label_m = re.search(
+            rf"LABEL:\s*\n(.+?)(?=\n\n|\n(?:{_LABEL_STOP})|\Z)",
+            block,
+            re.S | re.I,
+        )
+    if not label_m:
+        inline = re.search(r"^LABEL:\s*(.+)$", block, re.M | re.I)
+        if inline:
+            beat["label"] = _strip(inline.group(1))
+            return
+    if label_m:
+        for line in label_m.group(1).splitlines():
+            line = _strip(line)
+            if line:
+                beat["label"] = line
+                return
+
+
 def _parse_beat_block(block: str) -> dict[str, Any]:
     beat: dict[str, Any] = {
         "hold": 1.2,
@@ -212,19 +352,7 @@ def _parse_beat_block(block: str) -> dict[str, Any]:
             else:
                 beat[field] = val
 
-    label_m = re.search(
-        r"(?:─── CONTENT ───\s*\n)?LABEL:\s*\n(.+?)(?=\n(?:TEXT|BG TEXT|───|\Z))",
-        block,
-        re.S | re.I,
-    )
-    if not label_m:
-        label_m = re.search(
-            r"LABEL:\s*\n(.+?)(?=\n(?:TEXT|BG TEXT|───|\Z))",
-            block,
-            re.S | re.I,
-        )
-    if label_m:
-        beat["label"] = _strip(label_m.group(1))
+    _parse_label(block, beat)
 
     card_m = re.search(
         r"TEXT\s*\(card[^)]*\):\s*\n(.+?)(?=\n(?:───|BG TEXT|ICONS|CARD|HOLD|\Z))",
@@ -293,6 +421,9 @@ def _parse_beat_block(block: str) -> dict[str, Any]:
     if visuals:
         beat["visuals"] = visuals
 
+    _parse_list_section(block, beat)
+    _parse_compare_sections(block, beat)
+    _parse_code_section(block, beat)
     _parse_card_section(block, beat)
     _parse_emphasis_section(block, beat)
     _parse_camera_section(block, beat)
@@ -323,15 +454,37 @@ def _parse_beat_block(block: str) -> dict[str, Any]:
             visuals["swap"]["trigger"] = em["word"]
 
     if not beat.get("layout"):
-        beat["layout"] = (
-            "text_right_icon_left" if beat.get("bg_lines") else "card_right_icon_left"
-        )
+        type_norm = (beat.get("type") or "").lower().replace(" ", "_")
+        if beat.get("code_lines") or type_norm in ("code_demo", "code"):
+            beat["layout"] = "code_full_card"
+        elif beat.get("left_lines") or beat.get("right_lines") or type_norm == "compare":
+            beat["layout"] = "dual_card"
+        else:
+            beat["layout"] = (
+                "text_right_icon_left" if beat.get("bg_lines") else "card_right_icon_left"
+            )
     if not beat.get("type"):
-        beat["type"] = "statement"
+        if beat.get("code_lines"):
+            beat["type"] = "code_demo"
+        elif beat.get("list_lines"):
+            beat["type"] = "list"
+        elif beat.get("left_lines") or beat.get("right_lines"):
+            beat["type"] = "compare"
+        else:
+            beat["type"] = "statement"
     if not beat.get("label"):
         beat["label"] = beat.get("_slug", "Beat").replace("_", " ").title()
 
     beat.pop("_slug", None)
+
+    try:
+        from beat_types import apply_type_defaults, normalize_beat_type  # noqa: WPS433
+
+        beat["type"] = normalize_beat_type(beat.get("type"))
+        beat = apply_type_defaults(beat)
+    except ImportError:
+        pass
+
     return beat
 
 
@@ -365,7 +518,15 @@ def parse_script(text: str) -> dict[str, Any]:
         if not block or not re.match(r"^###\s*BEAT", block, re.I):
             continue
         beat = _parse_beat_block(block)
-        if beat.get("label") or beat.get("card_lines") or beat.get("bg_lines"):
+        if (
+            beat.get("label")
+            or beat.get("card_lines")
+            or beat.get("bg_lines")
+            or beat.get("code_lines")
+            or beat.get("list_lines")
+            or beat.get("left_lines")
+            or beat.get("right_lines")
+        ):
             beats.append(beat)
 
     if not beats:

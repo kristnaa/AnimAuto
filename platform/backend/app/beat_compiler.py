@@ -42,24 +42,40 @@ class GeneratedScene(BeatScene):
 
 
 def _slug(label: str, index: int) -> str:
-    slug = re.sub(r"[^\w]+", "_", label.lower()).strip("_") or f"beat_{index + 1}"
+    clean = str(label).splitlines()[0]
+    slug = re.sub(r"[^\w]+", "_", clean.lower()).strip("_") or f"beat_{index + 1}"
     return slug[:40]
+
+
+def _comment_label(label: str) -> str:
+    """Single-line safe text for Python comments."""
+    line = str(label).splitlines()[0].strip()
+    return re.sub(r"\s+", " ", line) or "Beat"
+
+
+def _sanitize_beat(beat: dict) -> dict:
+    """Normalize beat fields before embedding in generated Python."""
+    out = dict(beat)
+    label = out.get("label")
+    if label is not None and "\n" in str(label):
+        out["label"] = str(label).splitlines()[0].strip() or "Beat"
+    return out
 
 
 def _beat_constant(index: int, beat: dict) -> tuple[str, list[str]]:
     """Return (variable_name, source lines) for one beat."""
+    beat = _sanitize_beat(beat)
     label = beat.get("label", f"Beat {index + 1}")
     slug = _slug(label, index)
     var = f"BEAT_{index + 1}_{slug}".upper()
     if not var[0].isalpha():
         var = f"B_{var}"
+    # repr() so embedded JSON survives Python string parsing (code_lines quotes).
     payload = json.dumps(beat, indent=4, ensure_ascii=False)
     lines = [
-        f"# Beat {index + 1} — {label}",
+        f"# Beat {index + 1} — {_comment_label(label)}",
         f"{var} = load_beat_json(",
-        '    """',
-        payload,
-        '    """',
+        f"    {payload!r}",
         ")",
     ]
     return var, lines
