@@ -185,6 +185,18 @@ export default function App() {
   const canRender =
     Boolean(project?.beats.length) || codeCustomized || hasPreview;
 
+  const runPreviewRender = async (
+    projectId: string,
+    options?: { code?: string; fromBeats?: boolean }
+  ) => {
+    const rendered = await renderProject(projectId, options);
+    if (rendered.preview_url) {
+      onPreviewReady();
+      setPreviewView("video");
+    }
+    return rendered;
+  };
+
   const handleSend = async (text?: string) => {
     const msg = (text ?? input).trim();
     if (!msg || !project || loading) return;
@@ -195,13 +207,20 @@ export default function App() {
     try {
       const res = await sendChat(project.id, msg);
       setProject(res.project);
+      setCodeCustomized(false);
+      await loadCode(project.id, { force: true });
       if (res.preview_url) {
         onPreviewReady();
         setPreviewView("video");
+      } else if (res.project.beats?.length) {
+        try {
+          await runPreviewRender(project.id, { fromBeats: true });
+        } catch (e) {
+          setError(`Render: ${String(e)}`);
+        }
+      } else if (res.render_error) {
+        setError(`Render: ${res.render_error}`);
       }
-      if (res.render_error) setError(`Render: ${res.render_error}`);
-      setCodeCustomized(false);
-      await loadCode(project.id, { force: true });
     } catch (e) {
       setError(String(e));
     } finally {
@@ -218,15 +237,20 @@ export default function App() {
     try {
       const res = await submitScript(project.id, script, useAiParse);
       setProject(res.project);
+      setCodeCustomized(false);
+      await loadCode(project.id, { force: true });
       if (res.preview_url) {
         onPreviewReady();
         setPreviewView("video");
-      }
-      if (res.render_error) {
+      } else if (res.project.beats?.length) {
+        try {
+          await runPreviewRender(project.id, { fromBeats: true });
+        } catch (e) {
+          setError(`Video imported but render failed: ${String(e)}`);
+        }
+      } else if (res.render_error) {
         setError(`Video imported but render failed: ${res.render_error}`);
       }
-      setCodeCustomized(false);
-      await loadCode(project.id, { force: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

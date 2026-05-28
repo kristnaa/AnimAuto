@@ -240,19 +240,11 @@ def chat(project_id: str, body: ChatRequest):
     project["chat"].append({"role": "assistant", "content": assistant_msg})
     store.save_project(project, snapshot=True)
 
-    render_error = None
-    preview_url = None
-    try:
-        _render_project(project_id, project, quality="-ql")
-        preview_url = f"/api/projects/{project_id}/preview"
-    except Exception as exc:
-        render_error = str(exc)
-
     return {
         "message": assistant_msg,
         "project": project,
-        "preview_url": preview_url,
-        "render_error": render_error,
+        "preview_url": None,
+        "render_error": None,
     }
 
 
@@ -303,19 +295,11 @@ def apply_script(project_id: str, body: ScriptRequest):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save project: {exc}") from exc
 
-    render_error = None
-    preview_url = None
-    try:
-        _render_project(project_id, project, quality="-ql")
-        preview_url = f"/api/projects/{project_id}/preview"
-    except Exception as exc:
-        render_error = str(exc)
-
     return {
         "message": f"Imported {len(beats)} beat(s) from script.",
         "project": project,
-        "preview_url": preview_url,
-        "render_error": render_error,
+        "preview_url": None,
+        "render_error": None,
     }
 
 

@@ -432,6 +432,7 @@ sudo systemctl reload nginx
 | UI loads, API 502 | Backend down | `systemctl status manimations-backend` |
 | CORS error in browser | Origin not in allow list | Update `main.py` CORS |
 | Render timeout | Droplet too small | Upgrade RAM/CPU |
+| Chat/API **504 Gateway Timeout** (~60s) | Host nginx default `proxy_read_timeout` | Set `proxy_read_timeout 600s` on the proxy to Docker (`:8088`); see `platform/deploy/nginx-host-docker.conf.example` |
 | `Manim render failed` | Missing venv/deps | Phase 3.2 + FFmpeg |
 | Icons missing | No outbound HTTPS | Allow egress; Iconify API |
 | OpenAI 503 | Missing API key | Check `platform/.env` |
@@ -455,6 +456,7 @@ sudo systemctl reload nginx
 ## Related files in this repo
 
 - `platform/deploy/nginx.conf.example` — Nginx template  
+- `platform/deploy/nginx-host-docker.conf.example` — Host nginx proxying to Docker (`8088`) with long API timeouts  
 - `platform/deploy/manimations-backend.service.example` — systemd unit  
 - `platform/README.md` — local development  
 - `platform/.env.example` — environment variables  
