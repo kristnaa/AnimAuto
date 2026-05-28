@@ -24,6 +24,7 @@ load_dotenv(MANIM_ROOT / ".env")
 from app.beat_compiler import compile_scene, generate_scene_code, patch_scene_code, starter_scene_code  # noqa: E402
 from app.openai_service import OpenAIService  # noqa: E402
 from app.project_store import ProjectStore  # noqa: E402
+from app.render_jobs import read_status, start_preview_render  # noqa: E402
 from app.renderer import render_scene  # noqa: E402
 from app.script_parser import parse_script  # noqa: E402
 
@@ -95,6 +96,63 @@ def _render_project(
         mp4 = store.render_path(project_id)
     render_scene(scene_path, output_mp4=mp4, quality=quality)
     return mp4
+
+
+def _prepare_render(
+    project_id: str,
+    project: dict,
+    body: RenderRequest | None,
+) -> tuple[dict, bool]:
+    """Compile scene if needed; return updated project and skip_compile flag."""
+    body = body or RenderRequest()
+    scene_path = store.scene_path(project_id)
+    skip = False
+
+    if body.code is not None:
+        if "class " not in body.code or "construct" not in body.code:
+            raise HTTPException(
+                status_code=400,
+                detail="Code must define a Scene class with a construct() method.",
+            )
+        _write_scene_code(project_id, body.code)
+        project["code_customized"] = True
+        store.save_project(project, snapshot=False)
+        skip = True
+    elif body.from_beats:
+        if not project.get("beats"):
+            raise HTTPException(status_code=400, detail="No beats to compile.")
+        project = _resolve_and_prefetch(project)
+        compile_scene(project, scene_path)
+        project["code_customized"] = False
+        store.save_project(project, snapshot=False)
+        skip = True
+    else:
+        skip = project.get("code_customized", False)
+        if not skip and project.get("beats"):
+            project = _resolve_and_prefetch(project)
+            store.save_project(project, snapshot=False)
+
+    return project, skip
+
+
+def _kickoff_preview_render(project_id: str, project: dict, *, skip_compile: bool) -> dict:
+    renders_dir = store.render_path(project_id).parent
+
+    def _run() -> None:
+        _render_project(project_id, project, quality="-ql", skip_compile=skip_compile)
+
+    status = start_preview_render(project_id, renders_dir, _run)
+    preview_url = (
+        f"/api/projects/{project_id}/preview"
+        if status.get("status") == "done"
+        else None
+    )
+    return {
+        "status": status.get("status", "rendering"),
+        "preview_url": preview_url,
+        "render_error": status.get("error"),
+        "code_customized": project.get("code_customized", False),
+    }
 
 
 def _read_scene_code(project_id: str, project: dict) -> dict:
@@ -343,42 +401,29 @@ def render_project(project_id: str, body: RenderRequest | None = None):
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    body = body or RenderRequest()
-    scene_path = store.scene_path(project_id)
+    project, skip = _prepare_render(project_id, project, body)
+    return _kickoff_preview_render(project_id, project, skip_compile=skip)
 
-    if body.code is not None:
-        if "class " not in body.code or "construct" not in body.code:
-            raise HTTPException(
-                status_code=400,
-                detail="Code must define a Scene class with a construct() method.",
-            )
-        _write_scene_code(project_id, body.code)
-        project["code_customized"] = True
-        store.save_project(project, snapshot=False)
-        skip = True
-    elif body.from_beats:
-        if not project.get("beats"):
-            raise HTTPException(status_code=400, detail="No beats to compile.")
-        project = _resolve_and_prefetch(project)
-        compile_scene(project, scene_path)
-        project["code_customized"] = False
-        store.save_project(project, snapshot=False)
-        skip = True
-    else:
-        skip = project.get("code_customized", False)
-        if not skip and project.get("beats"):
-            project = _resolve_and_prefetch(project)
-            store.save_project(project, snapshot=False)
 
+@app.get("/api/projects/{project_id}/render-status")
+def render_status(project_id: str):
     try:
-        _render_project(project_id, project, quality="-ql", skip_compile=skip)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        store.load_project(project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    return {
-        "preview_url": f"/api/projects/{project_id}/preview",
-        "code_customized": project.get("code_customized", False),
+    renders_dir = store.render_path(project_id).parent
+    status = read_status(renders_dir)
+    payload = {
+        "status": status.get("status", "idle"),
+        "error": status.get("error"),
+        "started_at": status.get("started_at"),
+        "finished_at": status.get("finished_at"),
+        "preview_url": None,
     }
+    if status.get("status") == "done" and store.render_path(project_id).exists():
+        payload["preview_url"] = f"/api/projects/{project_id}/preview"
+    return payload
 
 
 @app.get("/api/projects/{project_id}/code")

@@ -24,4 +24,12 @@ server {
     }
 }
 
+# If Caddy sits in front of Docker instead of nginx, add to the Caddyfile:
+#   reverse_proxy localhost:8088 {
+#       transport http {
+#           read_timeout 10m
+#           write_timeout 10m
+#       }
+#   }
+
 # After certbot: certbot --nginx -d manim.enfec.cloud

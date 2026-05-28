@@ -744,6 +744,11 @@ export default function App() {
                     controls
                     autoPlay
                     loop
+                    onError={() =>
+                      setError(
+                        "Preview video failed to load. Try Render preview again."
+                      )
+                    }
                   />
                 )}
               </div>

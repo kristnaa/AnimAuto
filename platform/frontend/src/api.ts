@@ -73,7 +73,29 @@ export interface ChatResponse {
   render_error: string | null;
 }
 
+export interface RenderResponse {
+  status?: string;
+  preview_url: string | null;
+  code_customized?: boolean;
+  render_error?: string | null;
+}
+
+export interface RenderStatusResponse {
+  status: "idle" | "rendering" | "done" | "error";
+  preview_url: string | null;
+  error?: string | null;
+  started_at?: string;
+  finished_at?: string;
+}
+
 const API = "/api";
+
+const RENDER_POLL_MS = 2000;
+const RENDER_POLL_MAX_MS = 600_000;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
 
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
@@ -114,21 +136,48 @@ export async function sendChat(projectId: string, message: string) {
   });
 }
 
+export async function getRenderStatus(projectId: string) {
+  return json<RenderStatusResponse>(`${API}/projects/${projectId}/render-status`);
+}
+
+async function waitForPreviewRender(projectId: string): Promise<RenderResponse> {
+  const deadline = Date.now() + RENDER_POLL_MAX_MS;
+  while (Date.now() < deadline) {
+    await sleep(RENDER_POLL_MS);
+    const status = await getRenderStatus(projectId);
+    if (status.status === "done" && status.preview_url) {
+      return { status: "done", preview_url: status.preview_url };
+    }
+    if (status.status === "error") {
+      throw new Error(status.error || "Manim render failed");
+    }
+  }
+  throw new Error("Render timed out waiting for preview");
+}
+
 export async function renderProject(
   projectId: string,
   options?: { code?: string; fromBeats?: boolean }
 ) {
-  return json<{ preview_url: string; code_customized?: boolean }>(
-    `${API}/projects/${projectId}/render`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        code: options?.code,
-        from_beats: options?.fromBeats ?? false,
-      }),
-    }
-  );
+  const started = await json<RenderResponse>(`${API}/projects/${projectId}/render`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      code: options?.code,
+      from_beats: options?.fromBeats ?? false,
+    }),
+  });
+
+  if (started.preview_url) {
+    return started;
+  }
+  if (started.status === "rendering" || started.status === "idle") {
+    return waitForPreviewRender(projectId);
+  }
+  if (started.render_error) {
+    throw new Error(started.render_error);
+  }
+  return started;
 }
 
 export async function submitScript(
