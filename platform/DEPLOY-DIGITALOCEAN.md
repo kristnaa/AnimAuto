@@ -207,13 +207,16 @@ Or set origins from an env var (recommended for multiple environments).
 
 ### 4.3 Data directory
 
-Projects are stored under the **deploy user's home**:
+Projects and themes are stored under the **deploy user's data dir** (`MANIMATIONS_DATA_DIR`, default `~/manimations-studio/`):
 
 ```
-/home/manim/manimations-studio/projects/
+/home/manim/manimations-studio/
+  studio.db              # Theme library (SQLite)
+  themes/{id}/             # Uploaded theme backgrounds
+  projects/{id}/           # project.json, renders, generated_scene.py
 ```
 
-No database setup required. Back up this folder regularly.
+Back up `studio.db`, `themes/`, and `projects/` regularly.
 
 ### 4.4 Background path
 
@@ -257,6 +260,8 @@ sudo ln -sf /etc/nginx/sites-available/manimations-studio \
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+Confirm the example includes **`proxy_read_timeout 600s`** (and `proxy_send_timeout 600s`) on `/api/` — long Manim preview/export jobs poll async status but nginx must not cut off slow requests on other paths.
 
 ### 6.2 Backend systemd service
 
@@ -363,18 +368,20 @@ Internet
    │
    ▼
 ┌──────────────────────────────────────┐
-│  Nginx (:443)                        │
-│  ├─ /        → frontend/dist (static)│
-│  └─ /api/*   → proxy → Uvicorn :8000 │
+│  Nginx (:443)  proxy_read_timeout 600s│
+│  ├─ /        → Docker :8088 or static│
+│  └─ /api/*   → FastAPI               │
 └──────────────────────────────────────┘
                    │
                    ▼
 ┌──────────────────────────────────────┐
-│  FastAPI (systemd)                   │
+│  FastAPI + background render threads │
 │  ├─ OpenAI API                       │
+│  ├─ SQLite studio.db (themes)        │
 │  ├─ ~/manimations-studio/projects/   │
-│  └─ subprocess: manim render         │
-│       uses ~/manimations/.venv       │
+│  ├─ POST /render → poll render-status│
+│  └─ POST /export → poll export-status│
+│       subprocess: manim render       │
 └──────────────────────────────────────┘
 ```
 

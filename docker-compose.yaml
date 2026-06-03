@@ -20,3 +20,4 @@ services:
     volumes:
       - ./projects:/projects
       - ./media:/app/media
+    # studio.db and themes/ are stored under ./projects when MANIMATIONS_DATA_DIR=/projects

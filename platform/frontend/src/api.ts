@@ -39,12 +39,56 @@ export interface BeatTypeMeta {
 export interface Project {
   id: string;
   name: string;
+  theme_id?: string;
   style_pack: string;
   use_camera: boolean;
   beats: Beat[];
   chat: ChatMessage[];
   code_customized?: boolean;
   updated_at?: string;
+}
+
+export interface TypographyStyle {
+  font: string;
+  font_size: number;
+  color: string;
+  weight: string;
+  cursor?: string | null;
+}
+
+export interface TypographySpec {
+  heading: TypographyStyle;
+  subheading: TypographyStyle;
+  paragraph: TypographyStyle;
+  code: TypographyStyle;
+}
+
+export interface PaletteSpec {
+  card_fill: string;
+  card_stroke: string;
+  accent: string;
+  emphasis_red: string;
+  label_color: string;
+  code_bg: string;
+  code_text: string;
+}
+
+export interface ThemeSummary {
+  id: string;
+  name: string;
+  description: string;
+  style_pack: string;
+  background_kind: string;
+  background_loop: boolean;
+  preview_url: string;
+  is_builtin: boolean;
+}
+
+export interface ThemeDetail extends ThemeSummary {
+  typography: TypographySpec;
+  palette?: PaletteSpec | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CodeResponse {
@@ -136,12 +180,58 @@ export async function health() {
   );
 }
 
-export async function createProject(name = "Untitled") {
+export async function createProject(name = "Untitled", themeId = "builtin_orange") {
   return json<Project>(`${API}/projects`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, theme_id: themeId }),
   });
+}
+
+export async function patchProject(
+  projectId: string,
+  body: { theme_id?: string; name?: string }
+) {
+  return json<Project>(`${API}/projects/${projectId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function listThemes() {
+  return json<{ themes: ThemeSummary[] }>(`${API}/themes`);
+}
+
+export async function getTheme(themeId: string) {
+  return json<ThemeDetail>(`${API}/themes/${themeId}`);
+}
+
+export function themeBackgroundUrl(themeId: string, cacheBust?: number) {
+  const q = cacheBust ? `?t=${cacheBust}` : "";
+  return `${API}/themes/${themeId}/background${q}`;
+}
+
+export async function createTheme(form: FormData) {
+  const res = await fetch(`${API}/themes`, { method: "POST", body: form });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || res.statusText);
+  }
+  return res.json() as Promise<ThemeDetail>;
+}
+
+export async function updateTheme(themeId: string, form: FormData) {
+  const res = await fetch(`${API}/themes/${themeId}`, { method: "PUT", body: form });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || res.statusText);
+  }
+  return res.json() as Promise<ThemeDetail>;
+}
+
+export async function deleteTheme(themeId: string) {
+  return json<{ message: string }>(`${API}/themes/${themeId}`, { method: "DELETE" });
 }
 
 export async function getProject(id: string) {

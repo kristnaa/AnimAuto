@@ -21,8 +21,7 @@ def run_beat_02_what_is_python(scene: BeatScene, *, use_camera: bool = False) ->
     question = load_beat_icon(EPISODE, BEAT, "shape_question", scale=1.4, color=WHITE)
     question.move_to(scene.panel_anchor("left", label))
 
-    right_text = scene.bg_lines("So first…", "what exactly is Python?", font_size=36)
-    right_text.move_to(scene.panel_anchor("right", label))
+    right_text = scene.bg_text_in("right", label, "So first…", "what exactly is Python?", font_size=36)
 
     scene.type_text(label, time_per_char=0.045, cursor_color=WHITE)
     scene.play(FadeIn(question), run_time=0.4)

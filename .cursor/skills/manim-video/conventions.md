@@ -26,8 +26,11 @@ Use plain `Scene` by default. **No camera zoom** unless the user explicitly asks
 
 ## Visual style (AI course videos)
 
-### Screen layout
-- **Background:** `background/orange_theme_BG.png` (always, full frame)
+### Visual style (default theme: `builtin_orange`)
+
+These values are the **built-in default theme** in Manimations Studio. Custom themes override background, typography, and palette at render time.
+
+- **Background:** `background/orange_theme_BG.png` (default; image, GIF, or looping video per theme)
 - **50/50 split:** left half = visual/animation, right half = white card (with margin)
 - Alternate card to **left** on some beats for variety
 - **No card:** short questions — white text directly on orange BG (right half)
@@ -37,7 +40,7 @@ Use plain `Scene` by default. **No camera zoom** unless the user explicitly asks
 
 ### Text animation
 - Use **`TypeWithCursor`** with yellow cursor for all text (not `Write`)
-- Code: `TypeWithCursor` on `Text(..., font="Courier New")`
+- Code: `TypeWithCursor` on `Text(..., font="Courier New")` — or **`code_demo`** beat type in Studio (full code card + output panel)
 - After typing: optional `Blink(cursor, blinks=2)`
 
 ### Other animations

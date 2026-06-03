@@ -46,7 +46,7 @@ class ProjectStore:
                 )
         return out
 
-    def create_project(self, name: str = "Untitled") -> dict:
+    def create_project(self, name: str = "Untitled", *, theme_id: str = "builtin_orange") -> dict:
         project_id = str(uuid.uuid4())[:8]
         pdir = self._project_dir(project_id)
         pdir.mkdir(parents=True)
@@ -55,6 +55,7 @@ class ProjectStore:
         project = {
             "id": project_id,
             "name": name,
+            "theme_id": theme_id,
             "style_pack": "course_clean",
             "use_camera": False,
             "beats": [],
@@ -69,7 +70,10 @@ class ProjectStore:
         path = self._project_dir(project_id) / "project.json"
         if not path.exists():
             raise FileNotFoundError(f"Project not found: {project_id}")
-        return json.loads(path.read_text())
+        project = json.loads(path.read_text())
+        if not project.get("theme_id"):
+            project["theme_id"] = "builtin_orange"
+        return project
 
     def save_project(self, project: dict, *, snapshot: bool = True) -> dict:
         project_id = project["id"]

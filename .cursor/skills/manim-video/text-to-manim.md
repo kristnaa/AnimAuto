@@ -36,6 +36,7 @@ We replicate this **manually in Cursor** using beats + conventions — no Node/O
 | `TRANSFORM_OBJECT` | Left: animation (circle→square); right: card with text |
 | `KINETIC_TEXT` | `TypeWithCursor` + `Blink`; no camera zoom |
 | `CREATE_SCENE` | Follow user's beat script literally |
+| Code demo / IDE window / "show code" | Studio **`code_demo`** beat — `LAYOUT: code_full_card`, `─── CODE ───` block |
 
 For **AI course videos**, default intent is `DEMONSTRATE_PROCESS` + `KINETIC_TEXT`.
 

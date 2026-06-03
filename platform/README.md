@@ -1,8 +1,8 @@
 # Manimations Studio
 
-Local-first platform: describe beats in chat → OpenAI structures them → visual resolver picks icons → Manim renders preview.
+Local-first platform: describe beats in chat or script → OpenAI structures them → visual resolver picks icons → async Manim preview and 1080p export.
 
-**No database. No cloud storage.** Projects saved to `~/manimations-studio/projects/`.
+**SQLite** stores the global theme library. **Projects** remain JSON on disk under `~/manimations-studio/projects/` (or `MANIMATIONS_DATA_DIR` in Docker).
 
 ## Setup
 
@@ -29,52 +29,83 @@ Or run both: `./platform/start.sh`
 
 ## Deploy to DigitalOcean
 
-See **[platform/DEPLOY-DIGITALOCEAN.md](DEPLOY-DIGITALOCEAN.md)** for step-by-step VPS deployment (Nginx + systemd + Manim + HTTPS).
+See **[platform/DEPLOY-DIGITALOCEAN.md](DEPLOY-DIGITALOCEAN.md)** for step-by-step VPS deployment (Nginx + Docker + Manim + HTTPS).
 
-Example configs: `platform/deploy/nginx.conf.example`, `platform/deploy/manimations-backend.service.example`
+Example configs: `platform/deploy/nginx.conf.example`, `platform/deploy/nginx-host-docker.conf.example`
 
 ## Architecture
 
+Two-phase flow — **ingest** (fast) then **render** (async, may take minutes):
+
 ```
-Chat (React)  →  FastAPI  →  OpenAI (beat JSON)
-                    ↓
-              visual_resolver (semantic icons)
-                    ↓
-              beat_interpreter (Manim)
-                    ↓
-              preview MP4 (local)
+Theme picker  →  create project (theme_id)
+       ↓
+Chat / Beat script  →  FastAPI  →  OpenAI (beat JSON)
+       ↓
+Save project.json (beats only — no render yet)
+       ↓
+POST /render (returns immediately, status: rendering)
+       ↓
+GET /render-status (poll every 2s)
+       ↓
+preview MP4 (latest.mp4)
+
+1080p60: POST /export → GET /export-status (progress % + phase) → download
 ```
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /api/projects/{id}/chat` | AI updates beats; returns project (no render) |
+| `POST /api/projects/{id}/script` | Parse script → beats (no render) |
+| `POST /api/projects/{id}/render` | Start preview render (`-ql`) in background |
+| `GET /api/projects/{id}/render-status` | Poll until preview ready |
+| `POST /api/projects/{id}/export` | Start 1080p60 export in background |
+| `GET /api/projects/{id}/export-status` | Poll progress % and phase |
+| `GET/POST /api/themes` | Theme library (SQLite + uploaded backgrounds) |
+
+Use **Re-render** in the preview toolbar after chat/script changes. Chat loading may show “Rendering…” while the follow-up `/render` poll runs.
+
+**Note:** `PUT /api/projects/{id}/code` with `render: true` still renders synchronously on the server (code editor path).
 
 ## Local storage
 
 | Path | Contents |
 |------|----------|
-| `~/manimations-studio/projects/{id}/project.json` | Beats, chat, resolved visuals |
+| `~/manimations-studio/studio.db` | Theme library (SQLite) |
+| `~/manimations-studio/themes/{id}/` | Uploaded theme backgrounds |
+| `~/manimations-studio/projects/{id}/project.json` | Beats, chat, theme_id, resolved visuals |
 | `~/manimations-studio/projects/{id}/history/` | Snapshots for **Revert** |
 | `~/manimations-studio/projects/{id}/renders/latest.mp4` | Preview video |
+| `~/manimations-studio/projects/{id}/renders/export_1080p60.mp4` | HD export |
+
+## Themes
+
+Before creating a video, pick or create a **theme** (background image/GIF/video loop, typography, optional color palette). Themes are global on the server. The selected `theme_id` is stored on the project and embedded in generated Manim scenes at render time.
+
+Built-in default: `builtin_orange` (repo `background/orange_theme_BG.png`).
 
 ## Visual resolver
 
 - Catalog: `assets/visual_catalog.json`
-- Style packs: `assets/style_packs/`
+- Style packs: `assets/style_packs/` (icon policy; often set per theme)
 - Resolver: `animations/visual_resolver.py`
 - Loader: `animations/visual_library.py`
-
-Concepts (`python`, `question`, `terminal`, `frustration`) map to procedural shapes, brand SVGs, or Iconify icons based on style pack.
 
 ## Example prompts
 
 - "Create a 3-beat intro: welcome to Python, what is Python?, simple answer with joke."
+- "Create a code_demo beat showing a Python decorator."
 - "Change beat 2 to use a bigger question mark."
-- "Make the punchline icon less scary — use a volume icon instead."
 
 ## Beat script mode
 
 Switch to **Beat script** in the left panel. Paste:
-- `beat.script.md` format (### BEAT headers, LABEL, TEXT, ICONS)
+- Beat script format (`### BEAT` headers — see `platform/assets/beat-script-template.md`)
 - Or JSON: `{"beats": [...]}`
 
-Click **Generate from script**. Optional: **Use AI to parse** for free-form text.
+Click **Generate from script** — this **parses and saves beats only**; preview render runs separately (async). Optional: **Use AI to parse** for free-form text.
+
+Supported beat types: `statement`, `question`, `joke`, `code_demo`, `list`, `compare`, `explain`, `recap`.
 
 ## Manim code editor
 
@@ -84,11 +115,11 @@ Switch to **Code** tab to:
 - Edit and click **Apply & Re-render**
 - **From beats** regenerates code from beat JSON (discards manual edits)
 
-Scene file saved locally: `~/manimations-studio/projects/{id}/generated_scene.py`
+Scene file: `~/manimations-studio/projects/{id}/generated_scene.py`
 
 ## Download 1080p60
 
-Click **1080p60** in the preview toolbar. Manim renders at `-qh` (1080p 60fps) and downloads the MP4 locally. File also saved at:
+Click **1080p60** in the preview toolbar. Export runs in the background; the UI shows a **progress bar** and phase (e.g. `Animation 12 (63%)`) while polling `/export-status`. When complete, the MP4 downloads automatically. Also saved at:
 
 `~/manimations-studio/projects/{id}/renders/export_1080p60.mp4`
 

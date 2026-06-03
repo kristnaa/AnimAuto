@@ -19,18 +19,22 @@ import {
   ChatMessage,
   Project,
   Snapshot,
+  ThemeSummary,
   BeatTypeMeta,
   beatScriptTemplateDownloadUrl,
-  createProject,
   downloadUrl,
   exportHd,
   formatPython,
   getBeatScriptTemplate,
   getBeatTypes,
+  getProject,
   getProjectCode,
+  getTheme,
   health,
   lintPython,
   listSnapshots,
+  listThemes,
+  patchProject,
   previewUrl,
   regenerateProjectCode,
   revertProject,
@@ -42,6 +46,7 @@ import {
 import { CodeEditor } from "./CodeEditor";
 import { BeatTypePicker } from "./components/BeatTypePicker";
 import { LayoutPreview } from "./components/LayoutPreview";
+import { ThemeGate } from "./components/ThemeGate";
 
 type PanelMode = "chat" | "script";
 type PreviewView = "video" | "code";
@@ -86,15 +91,30 @@ export default function App() {
   const [showTemplate, setShowTemplate] = useState(false);
   const [templateContent, setTemplateContent] = useState("");
   const [templateCopied, setTemplateCopied] = useState(false);
+  const [studioReady, setStudioReady] = useState(false);
+  const [themeName, setThemeName] = useState<string | null>(null);
+  const [themes, setThemes] = useState<ThemeSummary[]>([]);
+  const [themeChanging, setThemeChanging] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  const loadStudioProject = useCallback(async (projectId: string) => {
+    const p = await getProject(projectId);
+    setProject(p);
+    setStudioReady(true);
+    if (p.theme_id) {
+      try {
+        const t = await getTheme(p.theme_id);
+        setThemeName(t.name);
+      } catch {
+        setThemeName(p.theme_id);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     health()
       .then((h) => setApiOk(h.openai_configured))
       .catch(() => setApiOk(false));
-    createProject("My Animation")
-      .then(setProject)
-      .catch((e) => setError(String(e)));
     getBeatTypes()
       .then((res) => {
         setBeatTypes(res.beat_types);
@@ -133,6 +153,13 @@ export default function App() {
   useEffect(() => {
     if (project?.id) refreshSnapshots(project.id);
   }, [project?.id, project?.updated_at, refreshSnapshots]);
+
+  useEffect(() => {
+    if (!studioReady) return;
+    listThemes()
+      .then((res) => setThemes(res.themes))
+      .catch(() => setThemes([]));
+  }, [studioReady]);
 
   const onPreviewReady = () => {
     setHasPreview(true);
@@ -197,6 +224,27 @@ export default function App() {
       setPreviewView("video");
     }
     return rendered;
+  };
+
+  const handleThemeChange = async (themeId: string) => {
+    if (!project || project.theme_id === themeId || themeChanging) return;
+    setThemeChanging(true);
+    setError(null);
+    try {
+      const updated = await patchProject(project.id, { theme_id: themeId });
+      setProject(updated);
+      setCodeCustomized(false);
+      const t = await getTheme(themeId);
+      setThemeName(t.name);
+      if (updated.beats?.length) {
+        beginRenderPreview();
+        await runPreviewRender(project.id, { fromBeats: true });
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setThemeChanging(false);
+    }
   };
 
   const handleSend = async (text?: string) => {
@@ -433,6 +481,10 @@ export default function App() {
 
   const chat: ChatMessage[] = project?.chat ?? [];
 
+  if (!studioReady || !project) {
+    return <ThemeGate onReady={loadStudioProject} />;
+  }
+
   return (
     <div className="app">
       <header className="header">
@@ -442,6 +494,25 @@ export default function App() {
             <span>Manimations Studio</span>
           </div>
           {project && <span className="project-name">{project.name}</span>}
+          {project && themes.length > 0 ? (
+            <label className="theme-select-wrap">
+              <span className="sr-only">Theme</span>
+              <select
+                className="theme-select"
+                value={project.theme_id ?? "builtin_orange"}
+                disabled={themeChanging || rendering}
+                onChange={(e) => handleThemeChange(e.target.value)}
+              >
+                {themes.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            themeName && <span className="theme-badge">{themeName}</span>
+          )}
         </div>
         <div className="header-right">
           {apiOk === false && (

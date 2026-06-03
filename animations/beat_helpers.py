@@ -9,6 +9,8 @@ from manim import *
 from manim.utils.rate_functions import smooth
 from manim.utils import rate_functions
 
+from theme_loader import DEFAULT_THEME, normalize_theme, resolve_manim_color  # noqa: E402
+
 MANIM_ROOT = Path(__file__).resolve().parent.parent
 BG_PATH = str(MANIM_ROOT / "background" / "orange_theme_BG.png")
 LABEL_TOP_BUFF = 0.9
@@ -158,11 +160,46 @@ def _display_code_line(raw: str) -> str:
 
 
 class BeatLayoutMixin:
-    def setup_background(self, overscale: float = 1.0):
-        bg = ImageMobject(BG_PATH)
-        bg.scale_to_fit_width(config.frame_width * overscale)
+    def set_theme(self, theme: dict | None = None) -> None:
+        self._theme = normalize_theme(theme)
+
+    @property
+    def theme(self) -> dict:
+        return getattr(self, "_theme", None) or normalize_theme(None)
+
+    def _typo(self, role: str) -> dict:
+        return self.theme["typography"][role]
+
+    def _pal(self, key: str, fallback: str) -> str:
+        return str(self.theme.get("palette", {}).get(key, fallback))
+
+    def setup_background(self, overscale: float = 1.0, theme: dict | None = None):
+        if theme is not None:
+            self.set_theme(theme)
+        bg_spec = self.theme.get("background", {})
+        path = bg_spec.get("path") or BG_PATH
+        kind = bg_spec.get("kind", "image")
+        loop = bool(bg_spec.get("loop", True))
+        scale_w = config.frame_width * overscale
+
+        if kind == "video":
+            from manim import VideoMobject
+
+            bg = VideoMobject(str(path))
+            if loop:
+
+                def _loop(mob, dt: float) -> None:
+                    mob.video_time += dt
+                    if mob.video_time >= mob.duration:
+                        mob.video_time = 0
+
+                bg.add_updater(_loop)
+        else:
+            bg = ImageMobject(str(path))
+        bg.scale_to_fit_width(scale_w)
         bg.move_to(ORIGIN)
         self.add(bg)
+        self._background = bg
 
     def left_center(self):
         return LEFT * (config.frame_width / 4)
@@ -171,9 +208,41 @@ class BeatLayoutMixin:
         return RIGHT * (config.frame_width / 4)
 
     def top_label(self, text):
-        lbl = Text(text, font_size=48, color=WHITE, weight=BOLD)
+        spec = self._typo("heading")
+        lbl = Text(
+            text,
+            font=spec.get("font"),
+            font_size=spec["font_size"],
+            color=resolve_manim_color(spec["color"]),
+            weight=spec.get("weight", "BOLD"),
+        )
         lbl.to_edge(UP, buff=LABEL_TOP_BUFF)
+        max_w = config.frame_width - 2 * CONTENT_MARGIN_X
+        if lbl.width > max_w:
+            lbl.scale(max_w / lbl.width)
         return lbl
+
+    def on_card(self, text, font_size=28):
+        spec = self._typo("paragraph")
+        size = font_size if font_size != 28 else spec["font_size"]
+        return Text(
+            text,
+            font=spec.get("font"),
+            font_size=size,
+            color=resolve_manim_color(spec["color"]),
+            weight=spec.get("weight", "BOLD"),
+        )
+
+    def on_bg(self, text, font_size=36):
+        spec = self._typo("subheading")
+        size = font_size if font_size != 36 else spec["font_size"]
+        return Text(
+            text,
+            font=spec.get("font"),
+            font_size=size,
+            color=resolve_manim_color(spec["color"]),
+            weight=spec.get("weight", "BOLD"),
+        )
 
     def content_center_y(self, label: Mobject) -> float:
         frame_bottom = -config.frame_height / 2
@@ -199,9 +268,6 @@ class BeatLayoutMixin:
             "left": anchor[0] - width / 2,
             "bottom": anchor[1] - height / 2,
         }
-
-    def on_card(self, text, font_size=28):
-        return Text(text, font_size=font_size, color=BLACK, weight=BOLD)
 
     def card_lines(self, *lines, font_size=28, max_width=None):
         group = VGroup(*[self.on_card(line, font_size=font_size) for line in lines])
@@ -248,13 +314,55 @@ class BeatLayoutMixin:
             line.move_to([line.get_center()[0], card.get_center()[1], 0])
         return line
 
-    def on_bg(self, text, font_size=36):
-        return Text(text, font_size=font_size, color=WHITE, weight=BOLD)
-
-    def bg_lines(self, *lines, font_size=36):
+    def bg_lines(self, *lines, font_size=36, max_width=None):
         group = VGroup(*[self.on_bg(line, font_size=font_size) for line in lines])
+        if max_width is not None:
+            for line in group:
+                if line.width > max_width:
+                    line.scale(max_width / line.width)
         group.arrange(DOWN, buff=0.3, aligned_edge=LEFT)
         return group
+
+    def text_panel_bounds(self, side: str, label: Mobject) -> dict:
+        """Axis-aligned bounds for a left/right half-panel below the label."""
+        return self.icon_panel_bounds(side, label)
+
+    def place_bg_text(
+        self,
+        content: Mobject,
+        side: str,
+        label: Mobject,
+        *,
+        pad_x=ICON_PANEL_PAD_X,
+        pad_y=ICON_PANEL_PAD_Y,
+    ):
+        """Fit and position white-on-background text inside a half-panel."""
+        bounds = self.text_panel_bounds(side, label)
+        max_w = bounds["width"] - 2 * pad_x
+        max_h = bounds["height"] - 2 * pad_y
+
+        if isinstance(content, VGroup):
+            for mob in content:
+                if mob.width > max_w:
+                    mob.scale(max_w / mob.width)
+            content.arrange(DOWN, buff=0.3, aligned_edge=LEFT)
+
+        if content.width > max_w:
+            content.scale(max_w / content.width)
+        if content.height > max_h:
+            content.scale(max_h / content.height)
+
+        panel_left = bounds["left"] + pad_x
+        panel_center_y = bounds["center"][1]
+        content.move_to([panel_left + content.width / 2, panel_center_y, 0])
+        return content
+
+    def bg_text_in(self, side: str, label: Mobject, *lines, font_size=36):
+        """Build bg lines sized to stay inside the text half-panel."""
+        bounds = self.text_panel_bounds(side, label)
+        max_w = bounds["width"] - 2 * ICON_PANEL_PAD_X
+        group = self.bg_lines(*lines, font_size=font_size, max_width=max_w)
+        return self.place_bg_text(group, side, label)
 
     def shape_question(self, radius=0.8):
         circle = Circle(radius=radius, color=WHITE, stroke_width=3)
@@ -912,9 +1020,9 @@ class BeatLayoutMixin:
             width=width,
             height=height,
             corner_radius=0.22,
-            fill_color=WHITE,
+            fill_color=resolve_manim_color(self._pal("card_fill", "#FFFFFF")),
             fill_opacity=0.96,
-            stroke_color=GREY_B,
+            stroke_color=resolve_manim_color(self._pal("card_stroke", "#888888")),
             stroke_width=1.5,
         )
         if label is not None:
@@ -1029,15 +1137,15 @@ class BeatLayoutMixin:
 
 
 class BeatScene(BeatLayoutMixin, Scene):
-    def setup_background(self):
-        super().setup_background(overscale=1.0)
+    def setup_background(self, overscale: float = 1.0, theme=None):
+        super().setup_background(overscale=overscale, theme=theme)
 
 
 class MovingBeatScene(BeatLayoutMixin, MovingCameraScene):
     """MovingCameraScene with beat layout + cam_* helpers."""
 
-    def setup_background(self):
-        super().setup_background(overscale=1.25)
+    def setup_background(self, overscale: float = 1.25, theme=None):
+        super().setup_background(overscale=overscale, theme=theme)
 
     def cam_restore(self, run_time=0.8):
         self.play(

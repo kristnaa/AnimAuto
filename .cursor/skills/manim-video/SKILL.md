@@ -35,9 +35,18 @@ When the user gives narration or beats (not Python):
    ```
 6. Final: `manim -qh Episode{N}/beats/beat{M}/<scene>.py <SceneClass>`
 
+## Manimations Studio
+
+Web UI at `platform/` — chat/script → beats JSON → async Manim preview + 1080p export.
+
+- Beat types: `statement`, `question`, `joke`, **`code_demo`**, `list`, `compare`, `explain`, `recap`
+- Beat script format: [script-template.md](script-template.md) · `platform/assets/beat-script-template.md`
+- **Themes:** pick/create before project; backgrounds + typography stored in SQLite
+- Chat/script **save beats only**; preview via async `POST /render` + poll `/render-status`
+
 ## Layout defaults (required)
 
-- **Background:** `background/orange_theme_BG.png` (always)
+- **Background:** default theme `builtin_orange` uses `background/orange_theme_BG.png`; Studio themes may use image, GIF, or looping video
 - **Split screen:** left 50% = visual/animation, right 50% = white card (alternate sides sometimes)
 - **No camera zoom** unless user explicitly requests it — use plain `Scene`
 - **Text on cards:** black, `TypeWithCursor` with yellow cursor

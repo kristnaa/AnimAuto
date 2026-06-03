@@ -116,6 +116,10 @@ def _parse_meta_header(text: str) -> dict[str, Any]:
         val = _strip(cam.group(1)).lower()
         meta["use_camera"] = val in ("moving", "yes", "true", "on")
 
+    theme = re.search(r"^THEME:\s*(.+)$", pre, re.M | re.I)
+    if theme:
+        meta["theme_id"] = _strip(theme.group(1))
+
     style = re.search(r"^STYLE_PACK:\s*(.+)$", pre, re.M | re.I)
     if style:
         meta["style_pack"] = _strip(style.group(1))
@@ -502,6 +506,7 @@ def parse_script(text: str) -> dict[str, Any]:
         if "beats" in data:
             return {
                 "name": data.get("name", "Script Import"),
+                "theme_id": data.get("theme_id"),
                 "style_pack": data.get("style_pack", "course_clean"),
                 "use_camera": data.get("use_camera", False),
                 "beats": data["beats"],
@@ -541,6 +546,7 @@ def parse_script(text: str) -> dict[str, Any]:
     return {
         "name": meta.get("name") or (name_m.group(1).strip() if name_m else "Script Import"),
         "style_pack": meta.get("style_pack", "course_clean"),
+        "theme_id": meta.get("theme_id"),
         "use_camera": use_camera,
         "beats": beats,
     }

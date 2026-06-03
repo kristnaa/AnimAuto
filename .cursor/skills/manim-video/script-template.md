@@ -8,7 +8,9 @@ Copy, fill in, and paste when requesting a new Manim video.
 
 ## Manimations Studio (Beat script tab)
 
-In **Manimations Studio**, paste beats into the Beat script tab and click **Generate**.
+In **Manimations Studio**, select a **theme**, then paste beats into the Beat script tab and click **Generate from script**.
+
+**Two-phase flow:** Generate **parses and saves beats only**. Preview render runs separately in the background (`POST /render` + poll `/render-status`). Use **Re-render** in the toolbar to refresh preview after edits.
 
 **Icons — describe + color (GPT picks Iconify), or paste explicit refs:**
 
@@ -156,6 +158,7 @@ Pick one per beat. Generate ASCII diagram with `generate_grid.py`.
 | `dual_icon` | Icons/visuals both sides, no card |
 | `text_right_icon_left` | No card — white text right, icon left |
 | `text_left_icon_right` | No card — white text left, icon right |
+| `code_full_card` | Full-width code editor + output (`code_demo` beats) |
 | `icon_left_anim_right` | Icon left, morph/animation right |
 | `card_right_stack_left` | Card right, **stacked** icons left (legacy name — use multi-icon + grid) |
 

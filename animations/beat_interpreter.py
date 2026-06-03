@@ -27,15 +27,15 @@ from icon_triggers import line_has_trigger, resolve_icon_reveal_mode  # noqa: E4
 from visual_library import load_visual  # noqa: E402
 from visual_resolver import resolve_beat_visuals  # noqa: E402
 
+from theme_loader import normalize_theme  # noqa: E402
+
 MANIM_ROOT = ROOT
 BG_PATH = MANIM_ROOT / "background" / "orange_theme_BG.png"
 
 
-def _apply_bg(scene):
-    bg = ImageMobject(str(BG_PATH))
-    bg.scale_to_fit_width(config.frame_width * (1.25 if isinstance(scene, MovingBeatScene) else 1.0))
-    bg.move_to(ORIGIN)
-    scene.add(bg)
+def _apply_bg(scene, theme=None):
+    overscale = 1.25 if isinstance(scene, MovingBeatScene) else 1.0
+    scene.setup_background(overscale=overscale, theme=theme)
 
 
 def _normalize_text(text: str) -> str:
@@ -498,8 +498,8 @@ def run_panel_beat(scene: BeatScene, beat: dict, *, use_camera: bool = False) ->
             card_lines_mobs = list(lines_group)
             punchline_mob = None
     elif beat.get("bg_lines"):
-        bg_lines_mobs = scene.bg_lines(*beat["bg_lines"])
-        bg_lines_mobs.move_to(scene.panel_anchor(_bg_text_side(layout), label))
+        bg_side = _bg_text_side(layout)
+        bg_lines_mobs = scene.bg_text_in(bg_side, label, *beat["bg_lines"])
 
     stack_specs = (beat.get("visuals_resolved") or {}).get("stack") or []
     icon_reveal = resolve_icon_reveal_mode(beat, stack_specs)

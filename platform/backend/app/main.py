@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -28,7 +28,11 @@ from app.render_jobs import read_status, start_render_job  # noqa: E402
 from app.renderer import render_scene  # noqa: E402
 from app.script_parser import parse_script  # noqa: E402
 
+from app.theme_schema import ThemeCreateBody, ThemeUpdateBody  # noqa: E402
+from app.theme_store import BUILTIN_ORANGE_ID, ThemeStore  # noqa: E402
+
 store = ProjectStore()
+theme_store = ThemeStore(store.data_dir)
 
 
 def _resolve_and_prefetch(project: dict) -> dict:
@@ -72,6 +76,10 @@ def _write_scene_code(project_id: str, code: str) -> Path:
     return scene_path
 
 
+def _theme_for_project(project: dict) -> dict:
+    return theme_store.theme_for_render(project.get("theme_id", BUILTIN_ORANGE_ID))
+
+
 def _render_project(
     project_id: str,
     project: dict,
@@ -87,9 +95,9 @@ def _render_project(
         if patched != source:
             scene_path.write_text(patched)
     if not skip_compile and not project.get("code_customized"):
-        compile_scene(project, scene_path)
+        compile_scene(project, scene_path, theme=_theme_for_project(project))
     elif not scene_path.exists():
-        code = generate_scene_code(project) if project.get("beats") else starter_scene_code()
+        code = generate_scene_code(project, theme=_theme_for_project(project)) if project.get("beats") else starter_scene_code(_theme_for_project(project))
         scene_path.write_text(code)
     if quality == "-qh":
         mp4 = store.export_path(project_id)
@@ -128,7 +136,7 @@ def _prepare_render(
         if not project.get("beats"):
             raise HTTPException(status_code=400, detail="No beats to compile.")
         project = _resolve_and_prefetch(project)
-        compile_scene(project, scene_path)
+        compile_scene(project, scene_path, theme=_theme_for_project(project))
         project["code_customized"] = False
         store.save_project(project, snapshot=False)
         skip = True
@@ -203,10 +211,11 @@ def _read_scene_code(project_id: str, project: dict) -> dict:
             "source": "file",
             "code_customized": project.get("code_customized", False),
         }
+    theme = _theme_for_project(project)
     if project.get("beats"):
-        code = generate_scene_code(project)
+        code = generate_scene_code(project, theme=theme)
     else:
-        code = starter_scene_code()
+        code = starter_scene_code(theme)
     scene_path.write_text(code)
     return {"code": code, "source": "generated", "code_customized": False}
 
@@ -233,6 +242,12 @@ class ChatRequest(BaseModel):
 
 class CreateProjectRequest(BaseModel):
     name: str = "Untitled"
+    theme_id: str = BUILTIN_ORANGE_ID
+
+
+class ProjectPatchRequest(BaseModel):
+    theme_id: str | None = None
+    name: str | None = None
 
 
 class RevertRequest(BaseModel):
@@ -258,6 +273,157 @@ class PythonToolRequest(BaseModel):
     code: str
 
 
+def _apply_theme_to_project(project: dict) -> dict:
+    theme_id = project.get("theme_id") or BUILTIN_ORANGE_ID
+    if not theme_store.theme_exists(theme_id):
+        theme_id = BUILTIN_ORANGE_ID
+    project["theme_id"] = theme_id
+    row = theme_store.get_theme_row(theme_id)
+    if row:
+        project["style_pack"] = row["style_pack"]
+    return project
+
+
+@app.get("/api/themes")
+def list_themes():
+    return {"themes": [t.model_dump() for t in theme_store.list_themes()]}
+
+
+@app.get("/api/themes/{theme_id}")
+def get_theme(theme_id: str):
+    theme = theme_store.get_theme(theme_id)
+    if not theme:
+        raise HTTPException(status_code=404, detail="Theme not found")
+    return theme.model_dump()
+
+
+@app.post("/api/themes")
+async def create_theme(
+    name: str = Form(...),
+    description: str = Form(""),
+    style_pack: str = Form("course_clean"),
+    background_kind: str = Form("image"),
+    background_loop: bool = Form(True),
+    typography_json: str = Form("{}"),
+    palette_json: str = Form(""),
+    background: UploadFile | None = File(None),
+):
+    import json as json_lib
+
+    from app.theme_schema import PaletteSpec, TypographySpec
+
+    try:
+        typography = TypographySpec(**json_lib.loads(typography_json or "{}"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid typography_json: {exc}") from exc
+    palette = None
+    if palette_json.strip():
+        try:
+            palette = PaletteSpec(**json_lib.loads(palette_json))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid palette_json: {exc}") from exc
+
+    body = ThemeCreateBody(
+        name=name,
+        description=description,
+        style_pack=style_pack,
+        background_kind=background_kind,  # type: ignore[arg-type]
+        background_loop=background_loop,
+        typography=typography,
+        palette=palette,
+    )
+    file_bytes = None
+    content_type = ""
+    filename = ""
+    if background and background.filename:
+        file_bytes = await background.read()
+        content_type = background.content_type or ""
+        filename = background.filename
+    try:
+        created = theme_store.create_theme(body, file_bytes, content_type, filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return created.model_dump()
+
+
+@app.put("/api/themes/{theme_id}")
+async def update_theme(
+    theme_id: str,
+    name: str | None = Form(None),
+    description: str | None = Form(None),
+    style_pack: str | None = Form(None),
+    background_kind: str | None = Form(None),
+    background_loop: bool | None = Form(None),
+    typography_json: str | None = Form(None),
+    palette_json: str | None = Form(None),
+    background: UploadFile | None = File(None),
+):
+    import json as json_lib
+
+    from app.theme_schema import PaletteSpec, TypographySpec
+
+    body = ThemeUpdateBody()
+    if name is not None:
+        body.name = name
+    if description is not None:
+        body.description = description
+    if style_pack is not None:
+        body.style_pack = style_pack
+    if background_kind is not None:
+        body.background_kind = background_kind  # type: ignore[assignment]
+    if background_loop is not None:
+        body.background_loop = background_loop
+    if typography_json:
+        try:
+            body.typography = TypographySpec(**json_lib.loads(typography_json))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid typography_json: {exc}") from exc
+    if palette_json:
+        try:
+            body.palette = PaletteSpec(**json_lib.loads(palette_json))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid palette_json: {exc}") from exc
+
+    file_bytes = None
+    content_type = ""
+    filename = ""
+    if background and background.filename:
+        file_bytes = await background.read()
+        content_type = background.content_type or ""
+        filename = background.filename
+    try:
+        updated = theme_store.update_theme(
+            theme_id, body, file_bytes, content_type, filename
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return updated.model_dump()
+
+
+@app.delete("/api/themes/{theme_id}")
+def delete_theme(theme_id: str):
+    try:
+        theme_store.delete_theme(theme_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"message": "Theme deleted"}
+
+
+@app.get("/api/themes/{theme_id}/background")
+def theme_background(theme_id: str):
+    row = theme_store.get_theme_row(theme_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Theme not found")
+    path = theme_store.resolve_background_path(row)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Background file not found")
+    return FileResponse(path, media_type=theme_store.background_media_type(theme_id))
+
+
 @app.get("/api/health")
 def health():
     return {
@@ -274,13 +440,37 @@ def list_projects():
 
 @app.post("/api/projects")
 def create_project(body: CreateProjectRequest):
-    return store.create_project(body.name)
+    if not theme_store.theme_exists(body.theme_id):
+        raise HTTPException(status_code=400, detail=f"Unknown theme: {body.theme_id}")
+    return store.create_project(body.name, theme_id=body.theme_id)
+
+
+@app.patch("/api/projects/{project_id}")
+def patch_project(project_id: str, body: ProjectPatchRequest):
+    try:
+        project = store.load_project(project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if body.theme_id is not None:
+        if not theme_store.theme_exists(body.theme_id):
+            raise HTTPException(status_code=400, detail=f"Unknown theme: {body.theme_id}")
+        project["theme_id"] = body.theme_id
+        row = theme_store.get_theme_row(body.theme_id)
+        if row:
+            project["style_pack"] = row["style_pack"]
+        project["code_customized"] = False
+    if body.name is not None:
+        project["name"] = body.name.strip()
+    project = _apply_theme_to_project(project)
+    store.save_project(project, snapshot=True)
+    return project
 
 
 @app.get("/api/projects/{project_id}")
 def get_project(project_id: str):
     try:
-        return store.load_project(project_id)
+        project = store.load_project(project_id)
+        return _apply_theme_to_project(project)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -333,6 +523,7 @@ def chat(project_id: str, body: ChatRequest):
 
     project["code_customized"] = False
     project = _resolve_and_prefetch(project)
+    project = _apply_theme_to_project(project)
 
     project.setdefault("chat", []).append({"role": "user", "content": body.message})
     project["chat"].append({"role": "assistant", "content": assistant_msg})
@@ -379,10 +570,18 @@ def apply_script(project_id: str, body: ScriptRequest):
             project["name"] = parsed["name"]
         if parsed.get("style_pack"):
             project["style_pack"] = parsed["style_pack"]
+        if parsed.get("theme_id"):
+            tid = parsed["theme_id"]
+            if theme_store.theme_exists(tid):
+                project["theme_id"] = tid
+                row = theme_store.get_theme_row(tid)
+                if row:
+                    project["style_pack"] = row["style_pack"]
         if "use_camera" in parsed:
             project["use_camera"] = parsed["use_camera"]
         project["code_customized"] = False
         project = _resolve_and_prefetch(project)
+        project = _apply_theme_to_project(project)
         project.setdefault("chat", []).append(
             {"role": "user", "content": "[Script import]\n" + body.script[:500]}
         )
@@ -522,7 +721,7 @@ def regenerate_project_code(project_id: str):
 
     project = _resolve_and_prefetch(project)
     project["code_customized"] = False
-    code = generate_scene_code(project)
+    code = generate_scene_code(project, theme=_theme_for_project(project))
     store.scene_path(project_id).write_text(code)
     store.save_project(project, snapshot=True)
 

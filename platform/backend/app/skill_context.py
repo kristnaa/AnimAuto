@@ -131,13 +131,14 @@ SCRIPT_OUTPUT_SCHEMA = """Return ONLY valid JSON (no markdown fences). Prefer sc
 
 {
   "name": "Episode title",
+  "theme_id": "builtin_orange",
   "style_pack": "course_clean",
   "use_camera": true,
   "script_markdown": "### BEAT 1 — slug\\nTYPE: statement\\n..."
 }
 
 script_markdown MUST be a complete beat script using:
-- Episode meta: CAMERA, STYLE_PACK, NAME at top
+- Episode meta: CAMERA, THEME, STYLE_PACK, NAME at top
 - ### BEAT N — slug headers
 - TYPE, LAYOUT, CAMERA, DURATION per beat
 - ─── TIMELINE ─── table (anim_type, anim_grow_card, cam_* hooks)
@@ -183,6 +184,7 @@ Follow the authoring knowledge below exactly — same rules as our Cursor manim-
 - emphasis entries must be objects {{"word", "color", "animation"}}.
 - label must be ONE short line (never include LIST/CODE sections in label).
 - If user asks to tweak, change only what they asked; preserve other beats.
+- Do NOT include theme_id in project — visual theme is chosen by the user in the UI, not via chat.
 """
 
 

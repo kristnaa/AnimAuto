@@ -1,17 +1,18 @@
 # Beat Script Template — Manimations Studio
 
-Use this file in the **Beat script** tab. Studio parses every section and renders the video.
+Use this file in the **Beat script** tab. Studio **parses** every section into beat JSON — rendering is a **separate async step** (preview auto-starts after Generate; use **Re-render** to refresh).
 
 ---
 
 ## How to use
 
-1. Click **View template** or **Download** in the Beat script tab.
-2. Copy the **STARTER SCRIPT** block below (from episode meta through your beats).
-3. Paste into the Beat script editor.
-4. Fill in placeholders — one `### BEAT` block per idea (~5–8 seconds each).
-5. **Icons:** describe what you want + color — GPT picks the Iconify icon when you click **Generate**. Or paste explicit refs (`fa6-brands:flutter`).
-6. Click **Generate**. Use **Use AI author** only for rough narration → full script.
+1. Select a **theme** before creating your project (background, typography, palette).
+2. Click **View template** or **Download** in the Beat script tab.
+3. Copy the **STARTER SCRIPT** block below (from episode meta through your beats).
+4. Paste into the Beat script editor.
+5. Fill in placeholders — one `### BEAT` block per idea (~5–8 seconds each).
+6. **Icons:** describe what you want + color — GPT picks the Iconify icon when you click **Generate**. Or paste explicit refs (`fa6-brands:flutter`).
+7. Click **Generate from script** — saves beats; preview render runs in the background. Use **Use AI author** only for rough narration → full script.
 
 **Rules**
 
@@ -43,7 +44,8 @@ Use this file in the **Beat script** tab. Studio parses every section and render
 
 ```
 CAMERA:      moving          # none | moving
-STYLE_PACK:  course_clean    # course_clean | playful
+THEME:       builtin_orange  # theme id from theme library
+STYLE_PACK:  course_clean    # course_clean | playful (usually from theme)
 NAME:        Your Episode Title
 
 
@@ -295,7 +297,8 @@ icon_desktop: boxicons:desktop-filled | color: WHITE | trigger: desktop
 | `text_left_icon_right` | White text left, icon(s) right |
 | `card_right_only` | Card only, no icon |
 | `card_left_only` | Card only, no icon |
-| `dual_card` | Cards both sides |
+| `dual_card` | Cards both sides (compare beats) |
+| `code_full_card` | Full-width code editor + output panel (`code_demo`) |
 
 **Icon panel side:** icons go on the side **opposite** the card — `card_left_*` → icons **right**, `card_right_*` → icons **left**.
 
@@ -307,9 +310,44 @@ icon_desktop: boxicons:desktop-filled | color: WHITE | trigger: desktop
 |------|---------|
 | `statement` | Card + icon(s), normal reveal |
 | `question` | Single icon: `text_right_icon_left`, no card. Multi-icon + card: `card_left_icon_right` |
-| `joke punchline` | Setup lines + separate punchline; **2 icons** (primary + swap) + wiggle |
+| `joke` / `joke punchline` | Setup lines + separate punchline; **2 icons** (primary + swap) + wiggle |
 | `explain` | Card + tool icon (terminal, code) |
 | `recap` | Summary card, optional multi-icon grid |
+| `list` | Checklist card + optional icon — use `LIST (card, checks):` |
+| `compare` | Two cards (`dual_card`) — good vs bad, before vs after |
+| `code_demo` | Full-width code card — use `─── CODE ───` block (no ICONS required) |
+
+---
+
+## CODE section (`code_demo` beats)
+
+Use with `TYPE: code_demo` and `LAYOUT: code_full_card`.
+
+```
+─── CODE ───
+language: python
+result: success          # success | error
+output: |
+  Hello, World!
+lines:
+  print("Hello, World!")
+  print("Done")
+```
+
+Error example:
+
+```
+─── CODE ───
+language: python
+result: error
+error_line: 2
+error: NameError: name 'y' is not defined
+output: |
+  NameError: name 'y' is not defined
+lines:
+  x = 1
+  print(y)
+```
 
 ---
 
@@ -499,13 +537,13 @@ HOLD: 1.2s
 | Section | Required? | Notes |
 |---------|-----------|-------|
 | `### BEAT N — slug` | Yes | Unique slug per beat |
-| TYPE | Yes | statement, question, joke punchline |
-| LAYOUT | Yes | See layout table |
+| TYPE | Yes | statement, question, joke, code_demo, list, compare, explain, recap |
+| LAYOUT | Yes | See layout table (incl. `code_full_card`) |
 | ICON GRID | If 2–4 icons together | auto, horizontal, vertical, triple_top, triple_bottom, quad |
 | ICON REVEAL | Optional | auto, on_word, together |
 | CONTENT / LABEL | Yes | Yellow top heading |
-| CONTENT / TEXT | Yes | `TEXT (card, black)` or `TEXT (white, on BG)` |
-| ICONS | Yes | 1–4 icons — description + color (GPT picks Iconify) |
+| CONTENT / TEXT | Yes | `TEXT (card, black)`, `TEXT (white, on BG)`, `LIST (card, checks):`, or `─── CODE ───` |
+| ICONS | Usually | 1–4 icons — skip for `code_demo` |
 | CARD | If card layout | SIDE + SIZE |
 | EMPHASIS | If highlight word | word, color, animation |
 | CAMERA | If moving | hooks + cam_restore exit |
@@ -518,9 +556,18 @@ HOLD: 1.2s
 ```json
 {
   "name": "Python Foundation Intro",
+  "theme_id": "builtin_orange",
   "style_pack": "course_clean",
   "use_camera": true,
   "beats": [
+    {
+      "label": "Run Your Code",
+      "type": "code_demo",
+      "layout": "code_full_card",
+      "code_lines": ["print('Hello, World!')"],
+      "code_output": "Hello, World!",
+      "code_result": "success"
+    },
     {
       "label": "What Can You Build?",
       "type": "question",
