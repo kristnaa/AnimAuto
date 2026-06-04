@@ -95,6 +95,88 @@ def is_colorful_iconify_ref(ref: str) -> bool:
     return prefix in COLORFUL_ICONIFY_PREFIXES or prefix.startswith("emoji")
 
 
+_GRADIENT_DEF_RE = re.compile(
+    r"<linearGradient\s+id=\"([^\"]+)\"[^>]*>.*?</linearGradient>"
+    r"|<radialGradient\s+id=\"([^\"]+)\"[^>]*>.*?</radialGradient>",
+    re.DOTALL | re.IGNORECASE,
+)
+_STOP_COLOR_RE = re.compile(r'stop-color="([^"]+)"', re.IGNORECASE)
+_URL_FILL_RE = re.compile(r'fill="url\s*\(\s*#([^)]+)\s*\)"', re.IGNORECASE)
+_STYLE_URL_FILL_RE = re.compile(
+    r"style=\"([^\"]*fill\s*:\s*url\s*\(\s*#([^)]+)\s*\)[^\"]*)\"",
+    re.IGNORECASE,
+)
+
+
+def svg_uses_gradients(text: str) -> bool:
+    """True when SVG relies on gradient defs that Manim SVGMobject cannot render."""
+    if re.search(r"<(linearGradient|radialGradient)\b", text, re.IGNORECASE):
+        return True
+    return bool(re.search(r"url\s*\(\s*#", text))
+
+
+def flatten_svg_gradients(path: Path) -> Path:
+    """Replace gradient url(#…) fills with solid stop colors for Manim compatibility."""
+    try:
+        text = path.read_text()
+    except OSError:
+        return path
+    if not svg_uses_gradients(text):
+        return path
+
+    flat_path = path.with_name(f"{path.stem}.flat.svg")
+    if flat_path.exists() and flat_path.stat().st_mtime >= path.stat().st_mtime:
+        return flat_path
+
+    grad_colors: dict[str, str] = {}
+    for match in _GRADIENT_DEF_RE.finditer(text):
+        grad_id = match.group(1) or match.group(2)
+        if not grad_id:
+            continue
+        stop = _STOP_COLOR_RE.search(match.group(0))
+        if stop:
+            grad_colors[grad_id] = stop.group(1)
+
+    def _fill_for(grad_id: str) -> str | None:
+        return grad_colors.get(grad_id.strip())
+
+    def _replace_url_fill(match: re.Match[str]) -> str:
+        color = _fill_for(match.group(1))
+        return f'fill="{color}"' if color else match.group(0)
+
+    text = _URL_FILL_RE.sub(_replace_url_fill, text)
+
+    def _replace_style_url_fill(match: re.Match[str]) -> str:
+        style = match.group(1)
+        color = _fill_for(match.group(2))
+        if not color:
+            return match.group(0)
+        new_style = re.sub(
+            r"fill\s*:\s*url\s*\(\s*#[^)]+\s*\)",
+            f"fill:{color}",
+            style,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        return f'style="{new_style}"'
+
+    text = _STYLE_URL_FILL_RE.sub(_replace_style_url_fill, text)
+    text = _GRADIENT_DEF_RE.sub("", text)
+
+    flat_path.parent.mkdir(parents=True, exist_ok=True)
+    flat_path.write_text(text)
+    return flat_path
+
+
+def svg_path_for_manim(path: Path, *, ref: str = "", color: str | None = None) -> Path:
+    """Return an SVG path Manim can render with the intended palette."""
+    tint = normalize_icon_color(color)
+    preserve = should_preserve_svg_colors(path, ref)
+    if preserve or tint is None:
+        return flatten_svg_gradients(path)
+    return path
+
+
 def should_preserve_svg_colors(path: Path, ref: str = "") -> bool:
     """Keep original fills for brand / multi-color SVGs; mono stroke icons get tinted."""
     if ref.startswith("assets/") or ref.startswith("icons/"):
@@ -291,7 +373,8 @@ def fetch_iconify_svg(
 def _svg_to_mobject(path: Path, scale: float, color: str | None, *, ref: str = "") -> "Mobject":
     from manim import SVGMobject
 
-    mob = SVGMobject(str(path))
+    render_path = svg_path_for_manim(path, ref=ref, color=color)
+    mob = SVGMobject(str(render_path))
     tint = normalize_icon_color(color)
     if tint is not None and not should_preserve_svg_colors(path, ref):
         style_svg_mobject(mob, tint)

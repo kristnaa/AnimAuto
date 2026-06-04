@@ -173,6 +173,10 @@ def _bg_text_side(layout: str) -> str:
     return "right"
 
 
+def _is_icon_stack_panel(panel) -> bool:
+    return isinstance(panel, (VGroup, Group)) and len(panel.submobjects) > 0
+
+
 def _load_icon_panel(scene, beat: dict, label, icon_side: str, *, hide_for_sync: bool = False):
     """Load primary or multi-icon panel using invisible grid cells."""
     visuals = beat.get("visuals_resolved") or {}
@@ -579,8 +583,8 @@ def run_panel_beat(scene: BeatScene, beat: dict, *, use_camera: bool = False) ->
         hide_for_sync=use_word_sync and has_icon_triggers,
     )
     primary_mob = icon_mobs[0] if len(icon_mobs) == 1 else icon_panel
-    swap_mob = icon_mobs[1] if len(icon_mobs) > 1 and not isinstance(icon_panel, VGroup) else None
-    stack_mobs = icon_mobs if isinstance(icon_panel, VGroup) else []
+    swap_mob = icon_mobs[1] if len(icon_mobs) > 1 and not _is_icon_stack_panel(icon_panel) else None
+    stack_mobs = icon_mobs if _is_icon_stack_panel(icon_panel) else []
 
     trigger_map: dict[str, Mobject] = {}
     untriggered_icons: list = []

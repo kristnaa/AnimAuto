@@ -185,11 +185,13 @@ icon_id: description or fa6-brands:ref | color: WHITE | scale: 1.2 | trigger: wo
 |------|---------|
 | **icon_id** | Local name (`icon_python`, `shape_question`) |
 | **description** | Plain English — GPT searches Iconify (or paste `prefix:name`) |
-| **color** | `WHITE`, `BLUE`, `#3776AB`, etc. |
+| **color** | `WHITE`, `#3776AB`, hex, or **`ORIGINAL`** for full-color brand/emoji icons |
 | **scale** | Optional (default 1.2) |
 | **trigger** | Optional — word in TEXT that reveals this icon |
 
 Browse catalog in **Beats** tab → icon picker, or `GET /api/visual-catalog`.
+
+**Full-color logos:** use **ORIGINAL** for `devicon`, `fa6-brands`, emoji sets — the renderer flattens SVG gradients so Manim can display them. **Uploaded PNG/SVG** icons are stored per project under `icons/` and render via `ImageMobject` or flattened SVG.
 
 ---
 

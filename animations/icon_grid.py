@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Literal
 import numpy as np
 
 if TYPE_CHECKING:
-    from manim import Mobject, VGroup
+    from manim import Group, Mobject, VGroup
 
 IconGridMode = Literal[
     "auto",
@@ -31,9 +31,17 @@ CellSpec = tuple[float, float, float, float]
 
 
 def _manim():
-    from manim import VGroup
+    from manim import Group, VMobject, VGroup
 
-    return VGroup
+    return Group, VMobject, VGroup
+
+
+def _icon_container(*mobs: "Mobject"):
+    """VGroup for SVG icons; Group when rasters (ImageMobject) are included."""
+    Group, VMobject, VGroup = _manim()
+    if mobs and all(isinstance(m, VMobject) for m in mobs):
+        return VGroup(*mobs)
+    return Group(*mobs)
 
 
 def panel_from_anchor(
@@ -156,4 +164,4 @@ def layout_icons_in_panel(
         _fit_in_cell(mob, center, cell_w, cell_h)
         placed.append(mob)
 
-    return VGroup(*placed)
+    return _icon_container(*placed)

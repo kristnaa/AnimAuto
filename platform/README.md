@@ -97,6 +97,8 @@ Built-in default: `builtin_orange` (repo `background/orange_theme_BG.png`).
 - Style packs: `assets/style_packs/` (icon policy; often set per theme)
 - Resolver: `animations/visual_resolver.py`
 - Loader: `animations/visual_library.py`
+- **Gradient flattening:** `animations/icon_library.py` — brand SVGs with `linearGradient` / `url(#…)` fills are converted to solid fills before Manim load (`*.flat.svg` cache)
+- **Raster icons:** uploaded PNG/JPG and project icons load as `ImageMobject`; multi-icon grids use `Group` when rasters are present (`animations/icon_grid.py`)
 
 ## Example prompts
 

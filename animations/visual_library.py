@@ -15,6 +15,7 @@ from icon_library import (  # noqa: E402
     normalize_icon_color,
     should_preserve_svg_colors,
     style_svg_mobject,
+    svg_path_for_manim,
 )
 
 if TYPE_CHECKING:
@@ -63,7 +64,8 @@ def _resolve_color(color: str | None):
 
 def _svg_mob(path: Path, scale: float, color: str | None, *, ref: str = "") -> "Mobject":
     _, SVGMobject, _ = _manim()
-    mob = SVGMobject(str(path))
+    render_path = svg_path_for_manim(path, ref=ref, color=color)
+    mob = SVGMobject(str(render_path))
     tint = normalize_icon_color(color)
     if tint is not None and not should_preserve_svg_colors(path, ref):
         resolved = _resolve_color(tint)

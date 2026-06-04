@@ -77,6 +77,8 @@ manim -qh animations/my_scene.py MyScene
 ## Common pitfalls
 
 - `DrawBorderThenFill` is for vectors, not PNG `ImageMobject`
+- **Brand SVG gradients** (`devicon:python`, etc.) must use **ORIGINAL** color — renderer flattens gradients to solid fills (`*.flat.svg` cache); without this they appear black in Manim
+- **Uploaded PNG icons** in multi-icon grids use Manim `Group`, not `VGroup` (rasters are not `VMobject`)
 - Do not use camera zoom on every beat
 - Do not mix random text colors on the same card
 - All `self.play()` inside `construct()`

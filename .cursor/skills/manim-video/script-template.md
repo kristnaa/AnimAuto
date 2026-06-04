@@ -648,7 +648,7 @@ TIMELINE:
 9. **Multi-icon grid** — 2–4 icons use invisible grid; optional `trigger:` word-sync via `ICON REVEAL`.
 10. **Word-sync camera** — 3–4 icons with triggers → full-frame view during sync.
 11. **Emphasis** — red word + wiggle (+ icon wiggle if paired).
-12. **Icons (Studio)** — describe + color in ICONS section; GPT picks Iconify. **Icons (Episode)** — `icons.json` + `fetch_icons.py`.
+12. **Icons (Studio)** — describe + color in ICONS section; GPT picks Iconify. Use **`ORIGINAL`** for brand/emoji logos (`devicon`, `fa6-brands`); renderer flattens SVG gradients. Upload PNG/SVG per project via Icon tab. **Icons (Episode)** — `icons.json` + `fetch_icons.py`.
 13. **Camera:** optional — see [CAMERA](#camera-system) below; default `none`.
 
 ---

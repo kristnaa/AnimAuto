@@ -52,6 +52,10 @@ icon_desktop: boxicons:desktop-filled | color: WHITE | trigger: desktop
 
 Card on **left**, 2+1 icon grid on **right**.
 
+## Mixed SVG + PNG grids
+
+Grids can mix Iconify SVGs and **uploaded PNG/JPG** icons in the same beat. The layout engine uses Manim `VGroup` for vector-only stacks and `Group` when any slot is a raster image.
+
 ## JSON
 
 ```json
