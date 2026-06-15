@@ -21,16 +21,39 @@ from beat_helpers import (  # noqa: E402
     normalize_code_lines,
     sanitize_code_demo_beat,
 )
+from beat_pacing import normalize_beat_pacing, normalize_pacing_name, pacing_profile  # noqa: E402
 from beat_types import CODE_DEMO, COMPARE, LIST, apply_type_defaults, normalize_beat_type  # noqa: E402
 from icon_grid import layout_icons_in_panel  # noqa: E402
 from icon_triggers import line_has_trigger, resolve_icon_reveal_mode  # noqa: E402
-from visual_library import load_visual  # noqa: E402
+from statement_content import is_statement_full_card, normalize_statement_block, resolve_statement_mode, statement_flags  # noqa: E402
+from visual_library import load_statement_media, load_visual  # noqa: E402
 from visual_resolver import resolve_beat_visuals  # noqa: E402
 
 from theme_loader import normalize_theme  # noqa: E402
 
 MANIM_ROOT = ROOT
 BG_PATH = MANIM_ROOT / "background" / "orange_theme_BG.png"
+
+
+def _scene_pacing(scene) -> str:
+    return normalize_pacing_name(getattr(scene, "project_pacing", None))
+
+
+def _label_tpc(scene) -> float:
+    return pacing_profile(_scene_pacing(scene))["label_tpc"]
+
+
+def _line_tpc(scene) -> float:
+    return pacing_profile(_scene_pacing(scene))["line_tpc"]
+
+
+def _beat_hold(beat: dict, scene) -> float:
+    profile = pacing_profile(_scene_pacing(scene))
+    try:
+        hold = float(beat.get("hold", profile["default_hold"]))
+    except (TypeError, ValueError):
+        hold = profile["default_hold"]
+    return min(hold, profile["max_hold"])
 
 
 def _apply_bg(scene, theme=None):
@@ -315,7 +338,7 @@ def run_code_demo_beat(scene: BeatScene, beat: dict, *, use_camera: bool = False
     elif not success:
         error_line = len(code_lines)
 
-    scene.type_text(label, time_per_char=0.045, cursor_color=YELLOW)
+    scene.type_text(label, time_per_char=_label_tpc(scene), cursor_color=YELLOW)
 
     terminal, card, split_y, _, code_area_top, run_btn, title_bar = scene.empty_code_terminal_card(label)
     scene.play(GrowFromCenter(terminal), run_time=0.45)
@@ -456,7 +479,7 @@ def run_code_demo_beat(scene: BeatScene, beat: dict, *, use_camera: bool = False
         for line_mob in line_rows:
             _apply_emphasis_on_line(scene, line_mob, em)
 
-    scene.wait(float(beat.get("hold", 1.5)))
+    scene.wait(_beat_hold(beat, scene))
 
     if has_camera_spec:
         _run_camera(scene, beat, "exit", label=label, card=card)
@@ -480,33 +503,94 @@ def run_compare_beat(scene: BeatScene, beat: dict, *, use_camera: bool = False) 
     left_card = scene.empty_card(side="left", label=label)
     right_card = scene.empty_card(side="right", label=label)
 
-    scene.type_text(label, time_per_char=0.045, cursor_color=YELLOW)
+    scene.type_text(label, time_per_char=_label_tpc(scene), cursor_color=YELLOW)
     scene.play(GrowFromCenter(left_card), GrowFromCenter(right_card), run_time=0.4)
 
     left_group = scene.card_text_in(left_card, *left_lines)
     right_group = scene.card_text_in(right_card, *right_lines)
 
     for i, line in enumerate(left_group):
-        scene.type_text(line, time_per_char=0.05)
+        scene.type_text(line, time_per_char=_line_tpc(scene))
         if has_camera_spec:
             _run_camera(scene, beat, "after_line_1" if i == 0 else f"after_line_{i + 1}", label=label, card=left_card, card_side="left")
         elif cam_on and i == 0 and isinstance(scene, MovingBeatScene):
             scene.cam_focus_left(label, run_time=0.85)
 
     for i, line in enumerate(right_group):
-        scene.type_text(line, time_per_char=0.05)
+        scene.type_text(line, time_per_char=_line_tpc(scene))
         hook = "after_line_2" if i == 0 else f"after_line_{len(left_group) + i + 1}"
         if has_camera_spec:
             _run_camera(scene, beat, hook, label=label, card=right_card, card_side="right")
         elif cam_on and i == 0 and isinstance(scene, MovingBeatScene):
             scene.cam_focus_right(label, run_time=0.85)
 
-    scene.wait(float(beat.get("hold", 1.2)))
+    scene.wait(_beat_hold(beat, scene))
 
     if has_camera_spec:
         _run_camera(scene, beat, "exit", label=label, card=right_card)
     elif cam_on and isinstance(scene, MovingBeatScene):
         scene.cam_restore(run_time=0.7)
+
+    if not beat.get("continue_beat"):
+        scene.sweep_foreground(run_time=0.55)
+
+
+def run_statement_beat(scene: BeatScene, beat: dict, *, use_camera: bool = False) -> None:
+    """Full-width statement card — optional text, image, and/or video inside one card."""
+    block = normalize_statement_block(beat)
+    mode = resolve_statement_mode(block)
+    show_text, show_image, show_video = statement_flags(mode)
+
+    label = scene.top_label(beat.get("label", "Beat"))
+    card = scene.empty_full_card(label)
+    cam_on = _beat_uses_camera(beat, use_camera)
+    has_camera_spec = bool(beat.get("camera"))
+
+    text_group = None
+    text_lines = block.get("text_lines") or []
+    if show_text and text_lines:
+        text_group = scene.card_lines(*text_lines, max_width=card.width - 0.9)
+        for line in text_group:
+            line.set_opacity(0)
+
+    image_mob = load_statement_media(scene, block.get("image")) if show_image else None
+    video_mob = load_statement_media(scene, block.get("video")) if show_video else None
+    if image_mob is not None:
+        image_mob.set_opacity(0)
+    if video_mob is not None:
+        video_mob.set_opacity(0)
+
+    scene.place_statement_card_content(
+        card,
+        text=text_group,
+        image=image_mob,
+        video=video_mob,
+        mode=mode,
+    )
+
+    scene.type_text(label, time_per_char=_label_tpc(scene), cursor_color=YELLOW)
+    scene.play(GrowFromCenter(card), run_time=0.4)
+
+    if show_text and text_group is not None:
+        for line in text_group:
+            scene.type_text(line, time_per_char=_line_tpc(scene))
+            for em in beat.get("emphasis") or []:
+                _apply_emphasis_on_line(scene, line, em)
+
+    media: list = []
+    if image_mob is not None:
+        media.append(image_mob)
+    if video_mob is not None:
+        media.append(video_mob)
+    if media:
+        scene.play(*[FadeIn(m) for m in media], run_time=0.45)
+
+    if has_camera_spec:
+        _run_camera(scene, beat, "exit", label=label, card=card, card_side="center")
+    elif cam_on and isinstance(scene, MovingBeatScene):
+        scene.cam_restore(run_time=0.7)
+
+    scene.wait(_beat_hold(beat, scene))
 
     if not beat.get("continue_beat"):
         scene.sweep_foreground(run_time=0.55)
@@ -595,7 +679,7 @@ def run_panel_beat(scene: BeatScene, beat: dict, *, use_camera: bool = False) ->
 
     batch_icon_reveal = icon_panel and not (use_word_sync and has_icon_triggers)
 
-    scene.type_text(label, time_per_char=0.045, cursor_color=YELLOW)
+    scene.type_text(label, time_per_char=_label_tpc(scene), cursor_color=YELLOW)
 
     primary_shown = False
     if batch_icon_reveal and bg_lines_mobs is not None:
@@ -627,18 +711,18 @@ def run_panel_beat(scene: BeatScene, beat: dict, *, use_camera: bool = False) ->
             if is_list_beat and isinstance(line, VGroup) and len(line) >= 2:
                 check, text = line[0], line[1]
                 scene.play(FadeIn(check, scale=1.1), run_time=0.25)
-                scene.type_text(text, time_per_char=0.05)
+                scene.type_text(text, time_per_char=_line_tpc(scene))
                 typed.append(line)
             elif trigger_map and line_has_trigger(line.text, trigger_words):
                 revealed_words = scene.type_line_with_icon_triggers(
                     line,
                     trigger_map,
-                    time_per_char=0.05,
+                    time_per_char=_line_tpc(scene),
                     cursor_color=YELLOW,
                     revealed=revealed_words,
                 )
             else:
-                scene.type_text(line, time_per_char=0.05)
+                scene.type_text(line, time_per_char=_line_tpc(scene))
             typed.append(line)
             for em in beat.get("emphasis") or []:
                 _apply_emphasis_on_line(scene, line, em)
@@ -658,12 +742,12 @@ def run_panel_beat(scene: BeatScene, beat: dict, *, use_camera: bool = False) ->
                 revealed_words = scene.type_line_with_icon_triggers(
                     line,
                     trigger_map,
-                    time_per_char=0.05,
+                    time_per_char=_line_tpc(scene),
                     cursor_color=WHITE,
                     revealed=revealed_words,
                 )
             else:
-                scene.type_text(line, time_per_char=0.05)
+                scene.type_text(line, time_per_char=_line_tpc(scene))
             hook = f"after_line_{i + 1}"
             if has_camera_spec:
                 _run_camera(scene, beat, hook, label=label, card=card, card_side=card_side)
@@ -714,7 +798,7 @@ def run_panel_beat(scene: BeatScene, beat: dict, *, use_camera: bool = False) ->
             _run_camera(scene, beat, "punchline", label=label, card=card, card_side=card_side)
         elif cam_on and isinstance(scene, MovingBeatScene):
             scene.cam_focus_card(card, run_time=0.9)
-        scene.type_text(punchline_mob, time_per_char=0.05)
+        scene.type_text(punchline_mob, time_per_char=_line_tpc(scene))
         for em in beat.get("emphasis") or []:
             word = em.get("word")
             if word and _word_in_text(punchline_mob, word):
@@ -731,9 +815,9 @@ def run_panel_beat(scene: BeatScene, beat: dict, *, use_camera: bool = False) ->
                     indicate_color = tint if tint is not None else YELLOW
                     scene.play(Indicate(part, color=indicate_color), run_time=0.55)
     elif punchline_mob:
-        scene.type_text(punchline_mob, time_per_char=0.05)
+        scene.type_text(punchline_mob, time_per_char=_line_tpc(scene))
 
-    scene.wait(float(beat.get("hold", 1.2)))
+    scene.wait(_beat_hold(beat, scene))
 
     if has_camera_spec:
         _run_camera(scene, beat, "exit", label=label, card=card, card_side=card_side)
@@ -746,7 +830,9 @@ def run_panel_beat(scene: BeatScene, beat: dict, *, use_camera: bool = False) ->
 
 
 def run_beat_from_spec(scene: BeatScene, beat: dict, *, use_camera: bool = False) -> None:
-    beat = apply_type_defaults(resolve_beat_visuals(dict(beat)))
+    beat = resolve_beat_visuals(dict(beat))
+    beat = apply_type_defaults(beat)
+    beat = normalize_beat_pacing(beat, _scene_pacing(scene))
     _begin_beat(scene, use_camera)
     beat_type = normalize_beat_type(beat.get("type"))
     layout = beat.get("layout", "")
@@ -756,6 +842,9 @@ def run_beat_from_spec(scene: BeatScene, beat: dict, *, use_camera: bool = False
         return
     if beat_type == COMPARE or layout == "dual_card":
         run_compare_beat(scene, beat, use_camera=use_camera)
+        return
+    if beat_type == "statement" and is_statement_full_card(beat):
+        run_statement_beat(scene, beat, use_camera=use_camera)
         return
 
     run_panel_beat(scene, beat, use_camera=use_camera)

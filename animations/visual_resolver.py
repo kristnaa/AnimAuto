@@ -391,8 +391,21 @@ def resolve_concept(
 
 def resolve_beat_visuals(beat: dict, style_pack_id: str | None = None) -> dict:
     """Resolve all visuals for a beat dict. Mutates and returns beat with resolved visuals."""
+    from statement_content import is_statement_full_card, normalize_statement_block
+
     pack = style_pack_id or beat.get("style_pack", "course_clean")
     beat = _normalize_card_content(beat)
+
+    if is_statement_full_card(beat):
+        beat = dict(beat)
+        block = normalize_statement_block(beat)
+        beat["statement"] = block
+        if block.get("text_lines"):
+            beat["card_lines"] = block["text_lines"]
+        beat["visuals_resolved"] = {}
+        beat["style_pack"] = pack
+        return beat
+
     raw_icons = dict(beat.get("icons") or {})
     if raw_icons:
         beat = dict(beat)

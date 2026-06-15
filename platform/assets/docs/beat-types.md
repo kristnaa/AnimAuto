@@ -4,7 +4,7 @@ Each beat has a `TYPE` that controls content structure and default pacing.
 
 | TYPE | Pattern |
 |------|---------|
-| `statement` | Card + icon(s), normal reveal |
+| `statement` | **Full-width card** — text, image, video, or combo inside one card |
 | `question` | Single icon: white text on BG, no card. Multi-icon: card + grid |
 | `joke` / `joke punchline` | Setup lines + punchline; **2 icons** (primary + swap) |
 | `explain` | Card + tool icon (terminal, code) |
@@ -15,12 +15,16 @@ Each beat has a `TYPE` that controls content structure and default pacing.
 
 ## statement
 
-Default teaching beat. Yellow label, white card with black typed lines, one or more icons on the opposite panel.
+Yellow label + **one full-width card** (`statement_full_card`). Put typed text, an uploaded image, a video clip, or any combination **inside the card**.
+
+See **[Statement beat](statement-beat)** for modes, uploads, and the **Statement card** section in the Content tab.
 
 ```
 TYPE: statement
-LAYOUT: card_right_icon_left
+LAYOUT: statement_full_card
 ```
+
+**Legacy:** `card_right_icon_left` still works for older icon+half-card statements.
 
 ## question
 

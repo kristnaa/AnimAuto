@@ -19,7 +19,7 @@ def beat_to_script_block(beat: dict, index: int) -> str:
     lines = [
         f"### BEAT {index} — {slug}",
         f"TYPE:       {beat.get('type', 'statement')}",
-        f"LAYOUT:     {beat.get('layout', 'card_right_icon_left')}",
+        f"LAYOUT:     {beat.get('layout', 'statement_full_card')}",
     ]
     if beat.get("use_camera"):
         lines.append("CAMERA:     yes")
@@ -34,7 +34,35 @@ def beat_to_script_block(beat: dict, index: int) -> str:
     lines.append(f'LABEL:      {beat.get("label", "Beat")}')
 
     if beat.get("card_lines"):
-        lines.append(_lines_block("CONTENT", beat["card_lines"]).rstrip())
+        if beat.get("layout") == "statement_full_card" or beat.get("statement"):
+            lines.append("TEXT (card, black):")
+            for line in beat["card_lines"]:
+                lines.append(f"  {line}")
+        else:
+            lines.append(_lines_block("CONTENT", beat["card_lines"]).rstrip())
+
+    statement = beat.get("statement") or {}
+    if isinstance(statement, dict) and (
+        statement.get("mode")
+        or statement.get("image")
+        or statement.get("video")
+        or statement.get("text_lines")
+    ):
+        lines.append("")
+        lines.append("─── STATEMENT ───")
+        if statement.get("mode"):
+            lines.append(f"MODE: {statement['mode']}")
+        text_lines = statement.get("text_lines") or beat.get("card_lines") or []
+        if text_lines and not beat.get("card_lines"):
+            lines.append("TEXT (card, black):")
+            for line in text_lines:
+                lines.append(f"  {line}")
+        image = statement.get("image") if isinstance(statement.get("image"), dict) else None
+        if image and image.get("ref"):
+            lines.append(f"IMAGE: {image['ref']}")
+        video = statement.get("video") if isinstance(statement.get("video"), dict) else None
+        if video and video.get("ref"):
+            lines.append(f"VIDEO: {video['ref']}")
     if beat.get("bg_lines"):
         lines.append(_lines_block("CONTENT (white, on BG)", beat["bg_lines"]).rstrip())
     if beat.get("list_lines"):

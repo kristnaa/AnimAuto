@@ -24,6 +24,12 @@
           "title": "Studio UI",
           "description": "Projects hub, tabs, preview, and export",
           "file": "studio-ui.md"
+        },
+        {
+          "slug": "voice-motion",
+          "title": "Voice motion",
+          "description": "Upload narration → Manim motion graphics on black",
+          "file": "voice-motion.md"
         }
       ]
     },
@@ -35,6 +41,12 @@
           "title": "Beat types",
           "description": "statement, question, joke, code_demo, and more",
           "file": "beat-types.md"
+        },
+        {
+          "slug": "statement-beat",
+          "title": "Statement beat",
+          "description": "Full-width card with text, image, video, or combinations",
+          "file": "statement-beat.md"
         },
         {
           "slug": "layouts",

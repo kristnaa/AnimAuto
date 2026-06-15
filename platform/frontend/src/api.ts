@@ -15,10 +15,34 @@ export interface BeatCameraStep {
   run_time?: number;
 }
 
+export interface StatementMediaRef {
+  ref?: string;
+  kind?: string;
+  loop?: boolean;
+  muted?: boolean;
+}
+
+export type StatementMode =
+  | "auto"
+  | "text"
+  | "image"
+  | "video"
+  | "text_image"
+  | "text_video"
+  | "text_image_video";
+
+export interface BeatStatement {
+  mode?: StatementMode;
+  text_lines?: string[];
+  image?: StatementMediaRef;
+  video?: StatementMediaRef;
+}
+
 export interface Beat {
   label: string;
   type: string;
   layout: string;
+  statement?: BeatStatement;
   card_lines?: string[];
   bg_lines?: string[];
   punchline_line?: string;
@@ -38,6 +62,104 @@ export interface Beat {
   visuals_resolved?: Record<string, unknown>;
 }
 
+export interface VoiceSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface VoiceWord {
+  word: string;
+  start: number;
+  end: number;
+}
+
+export interface VoiceSentence {
+  id: string;
+  text: string;
+  start: number;
+  end: number;
+}
+
+export interface DirectorBranch {
+  label: string;
+  icon_id?: string;
+  highlight?: string;
+  sub_labels?: string[];
+}
+
+export interface DirectorStage {
+  label: string;
+  icon_id?: string;
+  nested?: string[];
+}
+
+export interface DirectorPage {
+  id: string;
+  sentence_id: string;
+  start: number;
+  end: number;
+  intent?: string;
+  layout: string;
+  background_style?: string;
+  mode?: "full" | "single";
+  hub_tag?: string;
+  headline?: string;
+  sentence_text?: string;
+  bullets?: string[];
+  flow_labels?: string[];
+  stages?: DirectorStage[];
+  branches?: DirectorBranch[];
+  left_label?: string;
+  right_label?: string;
+  shape_label?: string;
+  caption?: string;
+  keyword?: string;
+  hub_label?: string;
+  orbit_labels?: string[];
+  hint?: string;
+  text_mode?: string;
+  exit?: string;
+}
+
+export interface DirectorPlan {
+  summary?: string;
+  analysis?: Record<string, unknown>;
+  pages: DirectorPage[];
+}
+
+export interface VoiceMotionPlanItem {
+  start: number;
+  end: number;
+  narration: string;
+  visuals?: string[];
+  mobjects?: string[];
+}
+
+export interface VoiceMotionData {
+  audio_ref?: string;
+  audio_filename?: string;
+  duration_sec?: number;
+  transcript?: string;
+  words?: VoiceWord[];
+  sentences?: VoiceSentence[];
+  segments?: VoiceSegment[];
+  motion_plan?: VoiceMotionPlanItem[];
+  director_plan?: DirectorPlan;
+  storyboard_status?: "draft" | "approved";
+  storyboard_warnings?: string[];
+}
+
+export interface ExcalidrawData {
+  drawing_ref?: string;
+  drawing_filename?: string;
+  format?: string;
+  animation_note?: string;
+  animation_sequence?: string[];
+}
+
+export type CreationMode = "beat_studio" | "voice_motion" | "excalidraw";
+
 export interface ProjectSummary {
   id: string;
   name: string;
@@ -45,6 +167,7 @@ export interface ProjectSummary {
   created_at?: string;
   beat_count: number;
   theme_id?: string;
+  creation_mode?: CreationMode;
   has_preview?: boolean;
 }
 
@@ -52,8 +175,10 @@ export interface BeatValidation {
   valid: boolean;
   issue_count: number;
   warning_count: number;
+  estimated_seconds?: number;
+  estimated_label?: string;
   issues: { beat_index: number; label: string; code: string; message: string }[];
-  warnings: { beat_index: number; label: string; code: string; message: string }[];
+  warnings: { beat_index?: number; label?: string; code: string; message: string; estimated_seconds?: number }[];
 }
 
 export interface BeatTypeRegion {
@@ -66,6 +191,15 @@ export interface BeatTypeRegion {
   kind: string;
 }
 
+export interface BeatTypeLayoutVariant {
+  id: string;
+  label: string;
+  description: string;
+  layout: string;
+  regions: BeatTypeRegion[];
+  script_template: string;
+}
+
 export interface BeatTypeMeta {
   id: string;
   label: string;
@@ -73,6 +207,7 @@ export interface BeatTypeMeta {
   layout: string;
   visuals: string[];
   regions: BeatTypeRegion[];
+  layout_variants?: BeatTypeLayoutVariant[];
   script_template: string;
   camera_defaults?: BeatCameraStep[];
 }
@@ -80,6 +215,9 @@ export interface BeatTypeMeta {
 export interface Project {
   id: string;
   name: string;
+  creation_mode?: CreationMode;
+  voice_motion?: VoiceMotionData | null;
+  excalidraw?: ExcalidrawData | null;
   theme_id?: string;
   style_pack: string;
   style_brief?: string;
@@ -202,7 +340,7 @@ export interface ExportStatusResponse {
 const API = "/api";
 
 const RENDER_POLL_MS = 400;
-const RENDER_POLL_MAX_MS = 600_000;
+const RENDER_POLL_MAX_MS = 1_800_000;
 
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -222,16 +360,20 @@ async function json<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export async function health() {
-  return json<{ status: string; openai_configured: boolean; data_dir: string }>(
+  return json<{ status: string; openai_configured: boolean; ffmpeg_available?: boolean; data_dir: string }>(
     `${API}/health`
   );
 }
 
-export async function createProject(name = "Untitled", themeId = "builtin_orange") {
+export async function createProject(
+  name = "Untitled",
+  themeId = "builtin_orange",
+  creationMode: CreationMode = "beat_studio"
+) {
   return json<Project>(`${API}/projects`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, theme_id: themeId }),
+    body: JSON.stringify({ name, theme_id: themeId, creation_mode: creationMode }),
   });
 }
 
@@ -336,7 +478,7 @@ export async function renderProject(
 ): Promise<RenderResponse> {
   onProgress?.(0, "Preparing");
 
-  const postPromise = json<RenderResponse>(`${API}/projects/${projectId}/render`, {
+  const started = await json<RenderResponse>(`${API}/projects/${projectId}/render`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -345,66 +487,27 @@ export async function renderProject(
     }),
   });
 
-  const deadline = Date.now() + RENDER_POLL_MAX_MS;
-  while (Date.now() < deadline) {
-    try {
-      const status = await getRenderStatus(projectId);
-      onProgress?.(status.progress ?? 0, status.phase ?? null);
-
-      if (status.status === "done" && status.preview_url) {
-        return { status: "done", preview_url: status.preview_url };
-      }
-      if (status.status === "error") {
-        throw new Error(status.error || "Manim render failed");
-      }
-      if (status.status === "cancelled") {
-        throw new Error("Render cancelled");
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message.includes("Manim render failed")) {
-        throw err;
-      }
-      if (err instanceof Error && err.message.includes("Render cancelled")) {
-        throw err;
-      }
-    }
-
-    const postOutcome = await Promise.race([
-      postPromise.then(
-        (res) => ({ ok: true as const, res }),
-        (err: unknown) => ({
-          ok: false as const,
-          err: err instanceof Error ? err : new Error(String(err)),
-        })
-      ),
-      sleep(0).then(() => null),
-    ]);
-
-    if (postOutcome?.ok === false) {
-      throw postOutcome.err;
-    }
-    if (postOutcome?.ok === true && postOutcome.res.preview_url) {
-      onProgress?.(100, "Complete");
-      return postOutcome.res;
-    }
-    if (postOutcome?.ok === true && postOutcome.res.render_error) {
-      throw new Error(postOutcome.res.render_error);
-    }
-
-    await sleep(RENDER_POLL_MS);
+  if (started.status === "done" && started.preview_url) {
+    onProgress?.(100, "Complete");
+    return started;
+  }
+  if (started.render_error) {
+    throw new Error(started.render_error);
   }
 
-  try {
-    const started = await postPromise;
-    if (started.preview_url) {
-      onProgress?.(100, "Complete");
-      return started;
+  for await (const status of pollRenderStatus(
+    () => getRenderStatus(projectId),
+    onProgress
+  )) {
+    if (status.status === "done" && status.preview_url) {
+      return { status: "done", preview_url: status.preview_url };
     }
-    if (started.render_error) {
-      throw new Error(started.render_error);
+    if (status.status === "error") {
+      throw new Error(status.error || "Manim render failed");
     }
-  } catch (err) {
-    throw err instanceof Error ? err : new Error(String(err));
+    if (status.status === "cancelled") {
+      throw new Error("Render cancelled");
+    }
   }
 
   throw new Error("Render timed out waiting for preview");
@@ -653,4 +756,161 @@ export async function uploadProjectIcon(projectId: string, file: File) {
 export function projectIconUrl(projectId: string, filename: string) {
   const name = filename.replace(/^icons\//, "");
   return `${API}/projects/${projectId}/icons/${encodeURIComponent(name)}`;
+}
+
+export async function uploadProjectMedia(projectId: string, file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API}/projects/${projectId}/media/upload`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Upload failed");
+  }
+  return res.json() as Promise<{
+    ref: string;
+    kind: string;
+    filename: string;
+    media_type: "image" | "video" | "audio";
+  }>;
+}
+
+export async function uploadVoiceAudio(projectId: string, file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API}/projects/${projectId}/voice/upload`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Upload failed");
+  }
+  return res.json() as Promise<{
+    ref: string;
+    filename: string;
+    voice_motion: VoiceMotionData;
+  }>;
+}
+
+export async function getVoiceMotion(projectId: string) {
+  return json<{
+    creation_mode: CreationMode;
+    voice_motion: VoiceMotionData | null;
+    ffmpeg_available: boolean;
+  }>(`${API}/projects/${projectId}/voice`);
+}
+
+export async function generateVoiceStoryboard(
+  projectId: string,
+  options?: { message?: string; retranscribe?: boolean }
+) {
+  return json<{
+    message: string;
+    project: Project;
+    sentences: VoiceSentence[];
+    director_plan: DirectorPlan;
+    storyboard_status: string;
+    storyboard_warnings: string[];
+  }>(`${API}/projects/${projectId}/voice/storyboard`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message: options?.message,
+      retranscribe: options?.retranscribe ?? false,
+    }),
+  });
+}
+
+export async function getVoiceStoryboard(projectId: string) {
+  return json<{
+    sentences: VoiceSentence[];
+    director_plan: DirectorPlan;
+    storyboard_status: string;
+    storyboard_warnings: string[];
+    layout_ids: string[];
+  }>(`${API}/projects/${projectId}/voice/storyboard`);
+}
+
+export async function patchVoiceStoryboard(projectId: string, pages: DirectorPage[]) {
+  return json<{
+    director_plan: DirectorPlan;
+    storyboard_status: string;
+    project: Project;
+  }>(`${API}/projects/${projectId}/voice/storyboard`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pages }),
+  });
+}
+
+export async function approveVoiceStoryboard(projectId: string) {
+  return json<{ storyboard_status: string; project: Project }>(
+    `${API}/projects/${projectId}/voice/storyboard/approve`,
+    { method: "POST" }
+  );
+}
+
+export async function generateVoiceMotion(
+  projectId: string,
+  options?: { message?: string; retranscribe?: boolean; force?: boolean }
+) {
+  return json<{
+    message: string;
+    project: Project;
+    code: string;
+    preview_url: string | null;
+  }>(`${API}/projects/${projectId}/voice/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message: options?.message,
+      retranscribe: options?.retranscribe ?? false,
+      force: options?.force ?? false,
+    }),
+  });
+}
+
+export async function uploadExcalidrawDrawing(projectId: string, file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API}/projects/${projectId}/excalidraw/upload`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Upload failed");
+  }
+  return res.json() as Promise<{
+    ref: string;
+    filename: string;
+    excalidraw: ExcalidrawData;
+  }>;
+}
+
+export async function generateExcalidrawAnimation(
+  projectId: string,
+  options?: { total_run_time?: number; hold_time?: number }
+) {
+  return json<{
+    message: string;
+    project: Project;
+    code: string;
+    scene_class: string;
+  }>(`${API}/projects/${projectId}/excalidraw/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      total_run_time: options?.total_run_time ?? 7,
+      hold_time: options?.hold_time ?? 1.25,
+    }),
+  });
+}
+
+export function projectMediaUrl(projectId: string, ref: string) {
+  const name = ref.replace(/^media\//, "");
+  return `${API}/projects/${projectId}/media/${encodeURIComponent(name)}`;
 }

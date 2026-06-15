@@ -95,7 +95,11 @@ export function ProjectHub({ onOpen, onCreate }: ProjectHubProps) {
                 <div className="project-card-body">
                   <div className="project-card-title">{p.name}</div>
                   <div className="project-card-meta">
-                    {p.beat_count} beat{p.beat_count === 1 ? "" : "s"}
+                    {p.creation_mode === "voice_motion" ? (
+                      <span className="project-card-badge">Voice</span>
+                    ) : (
+                      <span>{p.beat_count} beat{p.beat_count === 1 ? "" : "s"}</span>
+                    )}
                     {p.updated_at && (
                       <> · {new Date(p.updated_at).toLocaleDateString()}</>
                     )}

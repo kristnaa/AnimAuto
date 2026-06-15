@@ -30,6 +30,12 @@ from app.project_store import ProjectStore  # noqa: E402
 from app.render_jobs import cancel_render_job, read_status, start_render_job, update_status, write_status  # noqa: E402
 from app.renderer import render_scene  # noqa: E402
 from app.script_parser import parse_script  # noqa: E402
+from app.audio_mux import ffmpeg_available, mux_audio_video  # noqa: E402
+from app.voice_director import run_storyboard_pipeline
+from app.voice_layouts import LAYOUT_IDS, normalize_page
+from app.voice_motion import run_director_codegen, run_voice_pipeline, starter_voice_motion_scene  # noqa: E402
+from app.excalidraw_codegen import compile_excalidraw_scene, SCENE_CLASS as EXCALIDRAW_SCENE_CLASS, starter_excalidraw_scene  # noqa: E402
+from app.excalidraw_parser import parse_animation_sequence_phrases  # noqa: E402
 
 from app.theme_schema import ThemeCreateBody, ThemeUpdateBody  # noqa: E402
 from app.theme_store import BUILTIN_ORANGE_ID, ThemeStore  # noqa: E402
@@ -60,12 +66,14 @@ def _resolve_icon_descriptions(beats: list[dict]) -> list[dict]:
         return beats
 
 
-def _prepare_beats(beats: list[dict]) -> list[dict]:
+def _prepare_beats(beats: list[dict], *, pacing: str | None = None) -> list[dict]:
     from app.beat_compiler import _sanitize_beat  # noqa: E402
     from app.icon_resolver import beats_need_icon_resolution, validate_icon_refs  # noqa: E402
+    from beat_pacing import normalize_beats_pacing  # noqa: E402
     from beat_types import apply_type_defaults  # noqa: E402
 
     prepared = [apply_type_defaults(_sanitize_beat(dict(b))) for b in beats]
+    prepared = normalize_beats_pacing(prepared, pacing)
     if beats_need_icon_resolution(prepared):
         prepared = _resolve_icon_descriptions(prepared)
     else:
@@ -73,10 +81,96 @@ def _prepare_beats(beats: list[dict]) -> list[dict]:
     return prepared
 
 
+def _auto_pacing_for_beats(beats: list[dict], current: str | None = None) -> str:
+    """Pick dense pacing for long scripts unless user already chose relaxed explicitly."""
+    if current == "relaxed":
+        return "relaxed"
+    if len(beats) > 12:
+        return "dense"
+    chars = 0
+    for beat in beats:
+        for key in ("card_lines", "bg_lines", "list_lines", "label"):
+            raw = beat.get(key)
+            if isinstance(raw, list):
+                chars += sum(len(str(x)) for x in raw)
+            elif raw:
+                chars += len(str(raw))
+    if chars > 2800:
+        return "dense"
+    return current or "relaxed"
+
+
 def _write_scene_code(project_id: str, code: str) -> Path:
     scene_path = store.scene_path(project_id)
     scene_path.write_text(patch_scene_code(code))
     return scene_path
+
+
+def _is_voice_motion(project: dict) -> bool:
+    return project.get("creation_mode") == "voice_motion"
+
+
+def _is_excalidraw(project: dict) -> bool:
+    if project.get("creation_mode") == "excalidraw":
+        return True
+    return bool((project.get("excalidraw") or {}).get("drawing_ref"))
+
+
+def _compile_excalidraw_project(
+    project_id: str,
+    project: dict,
+    *,
+    total_run_time: float = 7.0,
+    hold_time: float = 1.25,
+    animation_sequence: list[str] | None = None,
+) -> str:
+    excal = dict(project.get("excalidraw") or {})
+    drawing_path = _excalidraw_path(project_id, excal.get("drawing_ref"))
+    if not drawing_path:
+        raise HTTPException(status_code=400, detail="Upload an Excalidraw .svg or .excalidraw file first.")
+    seq = animation_sequence if animation_sequence is not None else excal.get("animation_sequence")
+    code = compile_excalidraw_scene(
+        drawing_path,
+        total_run_time=total_run_time,
+        hold_time=hold_time,
+        animation_sequence=seq or None,
+    )
+    store.write_scene(project_id, code)
+    project["creation_mode"] = "excalidraw"
+    project["excalidraw"] = excal
+    project["code_customized"] = True
+    project["beats"] = []
+    return code
+
+
+def _voice_audio_path(project_id: str, audio_ref: str | None) -> Path | None:
+    if not audio_ref or not audio_ref.startswith("media/"):
+        return None
+    filename = audio_ref.split("/", 1)[1]
+    path = store._project_dir(project_id) / "media" / filename
+    return path if path.is_file() else None
+
+
+def _maybe_mux_voice_audio(project_id: str, project: dict, video_path: Path) -> Path:
+    if not _is_voice_motion(project):
+        return video_path
+    voice = project.get("voice_motion") or {}
+    audio_ref = voice.get("audio_ref")
+    audio_path = _voice_audio_path(project_id, audio_ref)
+    if not audio_path:
+        return video_path
+    silent = video_path.with_name(video_path.stem + "_silent.mp4")
+    if silent.exists():
+        silent.unlink()
+    video_path.rename(silent)
+    staged = video_path.with_name(video_path.stem + ".muxing.mp4")
+    try:
+        mux_audio_video(silent, audio_path, staged)
+        staged.replace(video_path)
+    finally:
+        silent.unlink(missing_ok=True)
+        staged.unlink(missing_ok=True)
+    return video_path
 
 
 def _theme_for_project(project: dict) -> dict:
@@ -100,7 +194,14 @@ def _render_project(
     if not skip_compile and not project.get("code_customized"):
         compile_scene(project, scene_path, theme=_theme_for_project(project))
     elif not scene_path.exists():
-        code = generate_scene_code(project, theme=_theme_for_project(project)) if project.get("beats") else starter_scene_code(_theme_for_project(project))
+        if _is_voice_motion(project):
+            code = starter_voice_motion_scene()
+        elif project.get("creation_mode") == "excalidraw":
+            code = starter_excalidraw_scene()
+        elif project.get("beats"):
+            code = generate_scene_code(project, theme=_theme_for_project(project))
+        else:
+            code = starter_scene_code(_theme_for_project(project))
         scene_path.write_text(code)
     if quality == "-qh":
         mp4 = store.export_path(project_id)
@@ -115,6 +216,8 @@ def _render_project(
         progress_callback=progress_callback,
         process_registry=(project_id, job_kind),
     )
+    if _is_voice_motion(project):
+        _maybe_mux_voice_audio(project_id, project, mp4)
     return mp4
 
 
@@ -295,6 +398,24 @@ class ChatRequest(BaseModel):
 class CreateProjectRequest(BaseModel):
     name: str = "Untitled"
     theme_id: str = BUILTIN_ORANGE_ID
+    creation_mode: str = "beat_studio"  # beat_studio | voice_motion | excalidraw
+
+
+class ExcalidrawGenerateRequest(BaseModel):
+    total_run_time: float = 7.0
+    hold_time: float = 1.25
+    animation_sequence: list[str] | None = None
+    animation_note: str | None = None
+
+
+class VoiceGenerateRequest(BaseModel):
+    message: str | None = None
+    retranscribe: bool = False
+    force: bool = False
+
+
+class StoryboardPatchRequest(BaseModel):
+    pages: list[dict] | None = None
 
 
 class ProjectPatchRequest(BaseModel):
@@ -494,6 +615,7 @@ def health():
     return {
         "status": "ok",
         "openai_configured": bool(os.environ.get("OPENAI_API_KEY")),
+        "ffmpeg_available": ffmpeg_available(),
         "data_dir": str(store.data_dir),
     }
 
@@ -514,9 +636,18 @@ def delete_project(project_id: str):
 
 @app.post("/api/projects")
 def create_project(body: CreateProjectRequest):
-    if not theme_store.theme_exists(body.theme_id):
+    mode = body.creation_mode if body.creation_mode in ("beat_studio", "voice_motion", "excalidraw") else "beat_studio"
+    if mode == "beat_studio" and not theme_store.theme_exists(body.theme_id):
         raise HTTPException(status_code=400, detail=f"Unknown theme: {body.theme_id}")
-    return store.create_project(body.name, theme_id=body.theme_id)
+    theme_id = body.theme_id if mode == "beat_studio" else BUILTIN_ORANGE_ID
+    project = store.create_project(body.name, theme_id=theme_id, creation_mode=mode)
+    if mode == "voice_motion":
+        code = starter_voice_motion_scene()
+        store.write_scene(project["id"], code)
+    elif mode == "excalidraw":
+        code = starter_excalidraw_scene()
+        store.write_scene(project["id"], code)
+    return project
 
 
 @app.patch("/api/projects/{project_id}")
@@ -574,7 +705,7 @@ def update_project_beats(project_id: str, body: BeatsUpdateRequest):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if not body.beats:
         raise HTTPException(status_code=400, detail="At least one beat required")
-    project["beats"] = _prepare_beats(body.beats)
+    project["beats"] = _prepare_beats(body.beats, pacing=project.get("pacing"))
     if body.use_camera is not None:
         project["use_camera"] = body.use_camera
     project["code_customized"] = False
@@ -592,7 +723,7 @@ def validate_project_beats(project_id: str):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     from app.beat_validation import validate_beats  # noqa: E402
 
-    return validate_beats(project.get("beats") or [])
+    return validate_beats(project.get("beats") or [], pacing=project.get("pacing"))
 
 
 @app.get("/api/visual-catalog")
@@ -681,6 +812,433 @@ def get_project_icon(project_id: str, filename: str):
     return FileResponse(path, media_type=media)
 
 
+_MEDIA_UPLOAD_MAX = 25 * 1024 * 1024
+_MEDIA_IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"}
+_MEDIA_VIDEO_EXT = {".mp4", ".webm", ".mov", ".m4v"}
+_MEDIA_AUDIO_EXT = {".mp3", ".wav", ".m4a", ".webm", ".ogg", ".flac", ".aac"}
+_EXCALIDRAW_EXT = {".svg", ".excalidraw"}
+
+
+@app.post("/api/projects/{project_id}/media/upload")
+async def upload_project_media(project_id: str, file: UploadFile = File(...)):
+    try:
+        store.load_project(project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    raw = await file.read()
+    if len(raw) > _MEDIA_UPLOAD_MAX:
+        raise HTTPException(status_code=400, detail="Media file too large (max 25 MB)")
+
+    name = (file.filename or "media").lower()
+    ext = Path(name).suffix.lower()
+    if ext not in _MEDIA_IMAGE_EXT | _MEDIA_VIDEO_EXT | _MEDIA_AUDIO_EXT:
+        raise HTTPException(
+            status_code=400,
+            detail="Supported: PNG, JPG, WEBP, GIF, SVG, MP4, WEBM, MOV, MP3, WAV, M4A, WEBM audio",
+        )
+
+    safe_stem = re.sub(r"[^\w.-]+", "_", Path(name).stem)[:48] or "media"
+    filename = f"{safe_stem}{ext}"
+    media_dir = store._project_dir(project_id) / "media"
+    media_dir.mkdir(parents=True, exist_ok=True)
+    dest = media_dir / filename
+    if dest.exists():
+        filename = f"{safe_stem}_{uuid.uuid4().hex[:8]}{ext}"
+        dest = media_dir / filename
+    dest.write_bytes(raw)
+    ref = f"media/{filename}"
+    media_type = "video" if ext in _MEDIA_VIDEO_EXT else "audio" if ext in _MEDIA_AUDIO_EXT else "image"
+    return {"ref": ref, "kind": "project", "filename": filename, "media_type": media_type}
+
+
+@app.post("/api/projects/{project_id}/voice/upload")
+async def upload_voice_audio(project_id: str, file: UploadFile = File(...)):
+    try:
+        project = store.load_project(project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    raw = await file.read()
+    if len(raw) > _MEDIA_UPLOAD_MAX:
+        raise HTTPException(status_code=400, detail="Audio file too large (max 25 MB)")
+
+    name = (file.filename or "narration").lower()
+    ext = Path(name).suffix.lower()
+    if ext not in _MEDIA_AUDIO_EXT:
+        raise HTTPException(status_code=400, detail="Supported audio: MP3, WAV, M4A, WEBM, OGG, FLAC, AAC")
+
+    safe_stem = re.sub(r"[^\w.-]+", "_", Path(name).stem)[:48] or "narration"
+    filename = f"{safe_stem}{ext}"
+    media_dir = store._project_dir(project_id) / "media"
+    media_dir.mkdir(parents=True, exist_ok=True)
+    dest = media_dir / filename
+    if dest.exists():
+        filename = f"{safe_stem}_{uuid.uuid4().hex[:8]}{ext}"
+        dest = media_dir / filename
+    dest.write_bytes(raw)
+    ref = f"media/{filename}"
+
+    voice = dict(project.get("voice_motion") or {})
+    voice["audio_ref"] = ref
+    voice["audio_filename"] = filename
+    project["creation_mode"] = "voice_motion"
+    project["voice_motion"] = voice
+    project["code_customized"] = True
+    store.save_project(project, snapshot=True)
+    return {"ref": ref, "filename": filename, "voice_motion": voice}
+
+
+def _excalidraw_path(project_id: str, ref: str | None) -> Path | None:
+    if not ref:
+        return None
+    rel = ref.removeprefix("media/")
+    path = store._project_dir(project_id) / "media" / rel
+    return path if path.is_file() else None
+
+
+@app.post("/api/projects/{project_id}/excalidraw/upload")
+async def upload_excalidraw_drawing(project_id: str, file: UploadFile = File(...)):
+    try:
+        project = store.load_project(project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    raw = await file.read()
+    if len(raw) > _MEDIA_UPLOAD_MAX:
+        raise HTTPException(status_code=400, detail="Drawing file too large (max 25 MB)")
+
+    name = (file.filename or "drawing.svg").lower()
+    ext = Path(name).suffix.lower()
+    if ext not in _EXCALIDRAW_EXT:
+        raise HTTPException(status_code=400, detail="Supported: .svg (Excalidraw export) or .excalidraw")
+
+    safe_stem = re.sub(r"[^\w.-]+", "_", Path(name).stem)[:48] or "drawing"
+    filename = f"{safe_stem}{ext}"
+    media_dir = store._project_dir(project_id) / "media"
+    media_dir.mkdir(parents=True, exist_ok=True)
+    dest = media_dir / filename
+    if dest.exists():
+        filename = f"{safe_stem}_{uuid.uuid4().hex[:8]}{ext}"
+        dest = media_dir / filename
+    dest.write_bytes(raw)
+    ref = f"media/{filename}"
+
+    excal = dict(project.get("excalidraw") or {})
+    excal["drawing_ref"] = ref
+    excal["drawing_filename"] = filename
+    excal["format"] = ext.lstrip(".")
+    project["creation_mode"] = "excalidraw"
+    project["excalidraw"] = excal
+    project["code_customized"] = True
+    store.save_project(project, snapshot=True)
+    return {"ref": ref, "filename": filename, "excalidraw": excal}
+
+
+@app.get("/api/projects/{project_id}/excalidraw")
+def get_excalidraw(project_id: str):
+    try:
+        project = store.load_project(project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "creation_mode": project.get("creation_mode", "beat_studio"),
+        "excalidraw": project.get("excalidraw"),
+    }
+
+
+@app.post("/api/projects/{project_id}/excalidraw/generate")
+def generate_excalidraw_animation(project_id: str, body: ExcalidrawGenerateRequest | None = None):
+    try:
+        project = store.load_project(project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    body = body or ExcalidrawGenerateRequest()
+    excal = dict(project.get("excalidraw") or {})
+    if body.animation_note:
+        excal["animation_note"] = body.animation_note.strip()
+    if body.animation_sequence is not None:
+        excal["animation_sequence"] = body.animation_sequence
+    elif body.animation_note:
+        excal["animation_sequence"] = parse_animation_sequence_phrases(body.animation_note)
+    project["excalidraw"] = excal
+
+    try:
+        code = _compile_excalidraw_project(
+            project_id,
+            project,
+            total_run_time=body.total_run_time,
+            hold_time=body.hold_time,
+            animation_sequence=excal.get("animation_sequence"),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Compile error: {exc}") from exc
+
+    excal = project.get("excalidraw") or {}
+    assistant_msg = f"Compiled {EXCALIDRAW_SCENE_CLASS} from {excal.get('drawing_filename', 'drawing')} — click Render to preview."
+    if excal.get("animation_sequence"):
+        seq = ", ".join(excal["animation_sequence"])
+        assistant_msg = f"Compiled {EXCALIDRAW_SCENE_CLASS} with draw order: {seq}."
+    project.setdefault("chat", []).append({"role": "user", "content": "Generate Excalidraw animation"})
+    project["chat"].append({"role": "assistant", "content": assistant_msg})
+    store.save_project(project, snapshot=True)
+    return {"message": assistant_msg, "project": project, "code": code, "scene_class": EXCALIDRAW_SCENE_CLASS}
+
+
+@app.get("/api/projects/{project_id}/voice")
+def get_voice_motion(project_id: str):
+    try:
+        project = store.load_project(project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "creation_mode": project.get("creation_mode", "beat_studio"),
+        "voice_motion": project.get("voice_motion"),
+        "ffmpeg_available": ffmpeg_available(),
+    }
+
+
+@app.get("/api/projects/{project_id}/voice/storyboard")
+def get_voice_storyboard(project_id: str):
+    try:
+        project = store.load_project(project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    voice = project.get("voice_motion") or {}
+    plan = voice.get("director_plan") or {}
+    return {
+        "sentences": voice.get("sentences") or [],
+        "director_plan": plan,
+        "storyboard_status": voice.get("storyboard_status", "draft"),
+        "storyboard_warnings": voice.get("storyboard_warnings") or [],
+        "layout_ids": list(LAYOUT_IDS),
+    }
+
+
+@app.post("/api/projects/{project_id}/voice/storyboard")
+def create_voice_storyboard(project_id: str, body: VoiceGenerateRequest | None = None):
+    try:
+        project = store.load_project(project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    body = body or VoiceGenerateRequest()
+    voice = project.get("voice_motion") or {}
+    audio_ref = voice.get("audio_ref")
+    audio_path = _voice_audio_path(project_id, audio_ref)
+    if not audio_path:
+        raise HTTPException(status_code=400, detail="Upload narration audio first.")
+
+    ai = _openai()
+    try:
+        result = run_storyboard_pipeline(
+            ai.client,
+            ai.model,
+            audio_path,
+            existing_voice=voice if voice.get("sentences") and not body.retranscribe else None,
+            retranscribe=body.retranscribe,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Storyboard error: {exc}") from exc
+
+    voice.update(
+        {
+            "transcript": result.get("transcript"),
+            "duration_sec": result.get("duration_sec"),
+            "words": result.get("words"),
+            "segments": result.get("segments"),
+            "sentences": result.get("sentences"),
+            "director_plan": result.get("director_plan"),
+            "storyboard_status": "draft",
+            "storyboard_warnings": result.get("storyboard_warnings") or [],
+        }
+    )
+    pages = (voice.get("director_plan") or {}).get("pages") or []
+    assistant_msg = (
+        f"Storyboard ready: {len(pages)} pages from {len(voice.get('sentences') or [])} sentences "
+        f"({voice.get('duration_sec', 0):.0f}s). Review layouts, then approve to generate video."
+    )
+    project["voice_motion"] = voice
+    project["creation_mode"] = "voice_motion"
+    project["code_customized"] = True
+    project.setdefault("chat", []).append(
+        {"role": "user", "content": body.message or "Generate storyboard from uploaded narration."}
+    )
+    project["chat"].append({"role": "assistant", "content": assistant_msg})
+    store.save_project(project, snapshot=True)
+    return {
+        "message": assistant_msg,
+        "project": project,
+        "sentences": voice.get("sentences"),
+        "director_plan": voice.get("director_plan"),
+        "storyboard_status": voice.get("storyboard_status"),
+        "storyboard_warnings": voice.get("storyboard_warnings"),
+    }
+
+
+@app.patch("/api/projects/{project_id}/voice/storyboard")
+def patch_voice_storyboard(project_id: str, body: StoryboardPatchRequest):
+    try:
+        project = store.load_project(project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    voice = project.get("voice_motion") or {}
+    plan = dict(voice.get("director_plan") or {})
+    pages = list(plan.get("pages") or [])
+    sentences = {s["id"]: s for s in (voice.get("sentences") or []) if isinstance(s, dict) and s.get("id")}
+    if not pages:
+        raise HTTPException(status_code=400, detail="No storyboard to edit. Generate storyboard first.")
+
+    if body.pages is not None:
+        updated: list[dict] = []
+        for i, raw in enumerate(body.pages):
+            if not isinstance(raw, dict):
+                continue
+            sid = str(raw.get("sentence_id") or (pages[i].get("sentence_id") if i < len(pages) else f"s{i + 1:02d}"))
+            sentence = sentences.get(sid) or {"id": sid, "text": raw.get("sentence_text", ""), "start": 0, "end": 1}
+            updated.append(normalize_page(raw, sentence, i))
+        plan["pages"] = updated
+        voice["director_plan"] = plan
+        voice["storyboard_status"] = "draft"
+
+    project["voice_motion"] = voice
+    store.save_project(project, snapshot=True)
+    return {
+        "director_plan": plan,
+        "storyboard_status": voice.get("storyboard_status"),
+        "project": project,
+    }
+
+
+@app.post("/api/projects/{project_id}/voice/storyboard/approve")
+def approve_voice_storyboard(project_id: str):
+    try:
+        project = store.load_project(project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    voice = project.get("voice_motion") or {}
+    if not (voice.get("director_plan") or {}).get("pages"):
+        raise HTTPException(status_code=400, detail="No storyboard to approve.")
+    voice["storyboard_status"] = "approved"
+    project["voice_motion"] = voice
+    store.save_project(project, snapshot=True)
+    return {"storyboard_status": "approved", "project": project}
+
+
+@app.post("/api/projects/{project_id}/voice/generate")
+def generate_voice_motion(project_id: str, body: VoiceGenerateRequest | None = None):
+    try:
+        project = store.load_project(project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    body = body or VoiceGenerateRequest()
+    voice = project.get("voice_motion") or {}
+    audio_ref = voice.get("audio_ref")
+    audio_path = _voice_audio_path(project_id, audio_ref)
+    director_plan = voice.get("director_plan") or {}
+    has_director = bool(director_plan.get("pages"))
+    storyboard_status = voice.get("storyboard_status", "draft")
+
+    if not audio_path and not body.message:
+        raise HTTPException(status_code=400, detail="Upload narration audio first.")
+
+    ai = _openai()
+    scene_path = store.scene_path(project_id)
+    existing_code = scene_path.read_text() if scene_path.exists() else None
+
+    try:
+        if body.message and existing_code and not body.retranscribe:
+            result = ai.generate_voice_motion_edit(body.message, project, existing_code or "")
+            code = result["code"]
+            assistant_msg = result.get("message", "Updated motion scene.")
+            pipeline = {}
+        elif has_director:
+            if storyboard_status != "approved" and not body.force:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Approve the storyboard before generating video (or pass force=true).",
+                )
+            code = run_director_codegen(director_plan)
+            assistant_msg = (
+                f"Compiled motion scene from {len(director_plan.get('pages') or [])} storyboard pages."
+            )
+            pipeline = {}
+        elif audio_path:
+            pipeline = run_voice_pipeline(
+                ai.client,
+                ai.model,
+                audio_path,
+                existing_code=existing_code if body.message else None,
+                edit_message=body.message,
+                skip_transcribe=bool(voice.get("segments") and not body.retranscribe),
+                existing_voice=voice if voice.get("segments") else None,
+            )
+            code = pipeline["code"]
+            voice.update(
+                {
+                    "transcript": pipeline.get("transcript"),
+                    "duration_sec": pipeline.get("duration_sec"),
+                    "segments": pipeline.get("segments"),
+                    "motion_plan": pipeline.get("motion_plan"),
+                }
+            )
+            assistant_msg = (
+                f"Generated motion scene from {len(voice.get('segments') or [])} timed segments "
+                f"({voice.get('duration_sec', 0):.0f}s)."
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Upload narration audio to generate.")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Voice motion error: {exc}") from exc
+
+    store.write_scene(project_id, code)
+    project["voice_motion"] = voice
+    project["creation_mode"] = "voice_motion"
+    project["code_customized"] = True
+    project["beats"] = []
+    user_note = body.message or "Generate motion scene from uploaded narration."
+    project.setdefault("chat", []).append({"role": "user", "content": user_note})
+    project["chat"].append({"role": "assistant", "content": assistant_msg})
+    store.save_project(project, snapshot=True)
+    return {
+        "message": assistant_msg,
+        "project": project,
+        "code": code,
+        "preview_url": None,
+    }
+
+
+@app.get("/api/projects/{project_id}/media/{filename}")
+def get_project_media(project_id: str, filename: str):
+    if ".." in filename or "/" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    path = store._project_dir(project_id) / "media" / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Media not found")
+    ext = path.suffix.lower()
+    if ext in _MEDIA_VIDEO_EXT:
+        media = "video/mp4" if ext == ".mp4" else "application/octet-stream"
+    elif ext == ".svg":
+        media = "image/svg+xml"
+    elif ext in {".jpg", ".jpeg"}:
+        media = "image/jpeg"
+    elif ext == ".webp":
+        media = "image/webp"
+    elif ext == ".gif":
+        media = "image/gif"
+    else:
+        media = "image/png"
+    return FileResponse(path, media_type=media)
+
+
 @app.get("/api/projects/{project_id}/snapshots")
 def list_snapshots(project_id: str):
     try:
@@ -705,6 +1263,65 @@ def chat(project_id: str, body: ChatRequest):
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    if _is_excalidraw(project):
+        excal = dict(project.get("excalidraw") or {})
+        excal["animation_note"] = body.message.strip()
+        excal["animation_sequence"] = parse_animation_sequence_phrases(body.message)
+        project["excalidraw"] = excal
+        try:
+            code = _compile_excalidraw_project(
+                project_id,
+                project,
+                animation_sequence=excal.get("animation_sequence"),
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Compile error: {exc}") from exc
+        seq = excal.get("animation_sequence") or []
+        if seq:
+            assistant_msg = (
+                f"Updated Excalidraw draw order: {', '.join(seq)}. "
+                "Click Render to preview the sketch animation."
+            )
+        else:
+            assistant_msg = (
+                "Saved your animation note. Mention draw order with phrases like "
+                "'hello first, then python logo, then python for AI text', then Render."
+            )
+        project.setdefault("chat", []).append({"role": "user", "content": body.message})
+        project["chat"].append({"role": "assistant", "content": assistant_msg})
+        store.save_project(project, snapshot=True)
+        return {
+            "message": assistant_msg,
+            "project": project,
+            "code": code,
+            "preview_url": None,
+            "render_error": None,
+        }
+
+    if _is_voice_motion(project):
+        ai = _openai()
+        scene_path = store.scene_path(project_id)
+        existing_code = scene_path.read_text() if scene_path.exists() else starter_voice_motion_scene()
+        try:
+            result = ai.generate_voice_motion_edit(body.message, project, existing_code)
+            code = result["code"]
+            assistant_msg = result.get("message", "Updated motion scene.")
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"OpenAI error: {exc}") from exc
+        store.write_scene(project_id, code)
+        project["code_customized"] = True
+        project.setdefault("chat", []).append({"role": "user", "content": body.message})
+        project["chat"].append({"role": "assistant", "content": assistant_msg})
+        store.save_project(project, snapshot=True)
+        return {
+            "message": assistant_msg,
+            "project": project,
+            "preview_url": None,
+            "render_error": None,
+        }
+
     ai = _openai()
     try:
         result = ai.generate_project(
@@ -719,7 +1336,9 @@ def chat(project_id: str, body: ChatRequest):
     incoming = result.get("project", {})
 
     if incoming.get("beats"):
-        project["beats"] = _prepare_beats(incoming["beats"])
+        pacing = _auto_pacing_for_beats(incoming["beats"], project.get("pacing"))
+        project["pacing"] = pacing
+        project["beats"] = _prepare_beats(incoming["beats"], pacing=pacing)
     if incoming.get("name"):
         project["name"] = incoming["name"]
     if incoming.get("style_pack"):
@@ -771,7 +1390,9 @@ def apply_script(project_id: str, body: ScriptRequest):
         raise HTTPException(status_code=400, detail="No beats found in script")
 
     try:
-        project["beats"] = _prepare_beats(beats)
+        pacing = _auto_pacing_for_beats(beats, project.get("pacing"))
+        project["pacing"] = pacing
+        project["beats"] = _prepare_beats(beats, pacing=pacing)
         if parsed.get("name"):
             project["name"] = parsed["name"]
         if parsed.get("style_pack"):
@@ -839,9 +1460,12 @@ def _flat_docs_pages(manifest: dict) -> list[dict]:
 
 @app.get("/api/beat-types")
 def get_beat_types():
-    from beat_types import list_beat_types  # noqa: E402
+    import importlib
 
-    return {"beat_types": list_beat_types()}
+    import beat_types as beat_types_module  # noqa: E402
+
+    importlib.reload(beat_types_module)
+    return {"beat_types": beat_types_module.list_beat_types()}
 
 
 @app.get("/api/beat-script-template")

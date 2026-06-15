@@ -29,7 +29,7 @@ Local-first web app: describe beats in **Chat** or **Beat script** → OpenAI st
 
 ### Projects hub
 
-- **New project** — pick or create a theme first (background, typography, palette).
+- **New project** — **Beat studio** (theme + beats) or **Voice motion** (upload narration, no theme).
 - **Open** — resumes last project via `localStorage`; deep link `?project={id}`.
 - **Rename / delete** projects from the hub.
 
@@ -37,9 +37,11 @@ Local-first web app: describe beats in **Chat** or **Beat script** → OpenAI st
 
 | Tab | Purpose |
 |-----|---------|
-| **Chat** | Plain-English prompts → AI updates beats → auto preview render |
-| **Beat script** | Paste structured script or JSON → **Generate from script** |
-| **Beats** | Timeline editor — Content / Icon / Emphasis / Camera tabs, icon picker, save |
+| **Chat** | Plain-English prompts → AI updates beats **or** voice motion edits |
+| **Beat script** | Structured beat scripts *(beat studio only)* |
+| **Beats** | Visual timeline editor *(beat studio only)* |
+
+**Voice motion projects** show Chat only plus upload/toggle in the message area. See [Voice motion](/docs/voice-motion).
 
 ### Right panel
 
@@ -58,8 +60,8 @@ Local-first web app: describe beats in **Chat** or **Beat script** → OpenAI st
 
 | Tab | Edits |
 |-----|--------|
-| Content | Label, type, layout, text, hold, continue beat |
-| Icon | Entrance + full icon picker (search, upload, hex color) |
+| Content | Label, type, layout, hold, continue beat; **statement beats** also show card mode, text, image/video upload |
+| Icon | Entrance + icon picker |
 | Emphasis | Word highlights — hex color, indicate/wiggle |
 | Camera | Per-beat camera toggle, steps, load type defaults |
 
@@ -76,7 +78,7 @@ Use **Re-render** after edits. Chat may show “Rendering…” while preview ru
 
 | TYPE | Use |
 |------|-----|
-| `statement` | Card + icon(s), normal reveal |
+| `statement` | Full-width card — text, image, video, or combo (see `/docs/statement-beat`) |
 | `question` | Single icon: white text on BG, no card. Multi-icon: card + grid |
 | `joke` / `joke punchline` | Setup + punchline; **2 icons** (primary + swap at punchline) |
 | `explain` | Card + tool icon (terminal, code) |

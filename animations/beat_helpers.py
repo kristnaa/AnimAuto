@@ -1035,6 +1035,86 @@ class BeatLayoutMixin:
             card.move_to(anchor)
         return card
 
+    def empty_full_card(self, label: Mobject):
+        """Full-width statement card below the label (content region minus margins)."""
+        bounds = self.content_region_bounds(label)
+        card = RoundedRectangle(
+            width=bounds["width"],
+            height=bounds["height"],
+            corner_radius=0.22,
+            fill_color=resolve_manim_color(self._pal("card_fill", "#FFFFFF")),
+            fill_opacity=0.96,
+            stroke_color=resolve_manim_color(self._pal("card_stroke", "#888888")),
+            stroke_width=1.5,
+        )
+        card.move_to([bounds["center_x"], bounds["center_y"], 0.0])
+        return card
+
+    def _fit_mobject_in_box(self, mob: Mobject, max_w: float, max_h: float) -> None:
+        if mob.width > max_w and mob.width > 0:
+            mob.scale(max_w / mob.width)
+        if mob.height > max_h and mob.height > 0:
+            mob.scale(max_h / mob.height)
+
+    def place_statement_card_content(
+        self,
+        card: Mobject,
+        *,
+        text: Mobject | None = None,
+        image: Mobject | None = None,
+        video: Mobject | None = None,
+        mode: str = "text",
+    ) -> Mobject | None:
+        """Stack text / image / video inside a full-width statement card."""
+        from statement_content import statement_flags
+
+        pad_x, pad_y = CARD_PAD_X, CARD_PAD_Y
+        inner_w = card.width - 2 * pad_x
+        inner_h = card.height - 2 * pad_y
+        show_text, show_image, show_video = statement_flags(mode)
+
+        slots: list[tuple[Mobject, float]] = []
+        if show_text and text is not None:
+            slots.append((text, 0.38 if (show_image or show_video) else 1.0))
+        if show_image and image is not None:
+            share = 0.32 if show_text and show_video else (0.45 if show_text or show_video else 1.0)
+            slots.append((image, share))
+        if show_video and video is not None:
+            share = 0.32 if show_text and show_image else (0.45 if show_text or show_image else 1.0)
+            slots.append((video, share))
+
+        if not slots:
+            return None
+
+        buff = 0.22
+        total_share = sum(s for _, s in slots)
+        available_h = inner_h - buff * max(0, len(slots) - 1)
+
+        placed: list[Mobject] = []
+        for mob, share in slots:
+            slot_h = available_h * (share / total_share)
+            self._fit_mobject_in_box(mob, inner_w, slot_h)
+            placed.append(mob)
+
+        from manim import Group, VGroup, VMobject
+
+        if len(placed) == 1:
+            content = placed[0]
+        elif all(isinstance(m, VMobject) for m in placed):
+            content = VGroup(*placed)
+            content.arrange(DOWN, buff=buff, aligned_edge=LEFT)
+        else:
+            content = Group(*placed)
+            content.arrange(DOWN, buff=buff)
+
+        if content.width > inner_w and content.width > 0:
+            content.scale(inner_w / content.width)
+        if content.height > inner_h and content.height > 0:
+            content.scale(inner_h / content.height)
+
+        content.move_to(card.get_center())
+        return content
+
     def typing_cursor_for(self, text_mob, cursor_color=YELLOW):
         return Rectangle(
             width=0.06,

@@ -58,6 +58,9 @@ REST endpoints for Manimations Studio backend (FastAPI, default `http://127.0.0.
 | `/api/beat-types` | GET | Beat type metadata |
 | `/api/visual-catalog` | GET | Icon concept catalog |
 | `/api/icons/search?q=` | GET | Search Iconify |
+| `/api/projects/{id}/icons/upload` | POST | Upload beat icon (SVG/PNG) |
+| `/api/projects/{id}/media/upload` | POST | Upload statement media (image/video, max 25 MB) |
+| `/api/projects/{id}/media/{filename}` | GET | Serve uploaded media |
 
 ## Health
 

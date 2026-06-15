@@ -42,28 +42,51 @@ def _region(
     return {"id": rid, "label": label, "x": x, "y": y, "w": w, "h": h, "kind": kind}
 
 
-BEAT_TYPES: dict[str, dict[str, Any]] = {
-    STATEMENT: {
-        "id": STATEMENT,
-        "label": "Statement",
-        "description": "White card + single icon — default lesson beat.",
+_LABEL = _region("label", "Label", 0.05, 0.02, 0.9, 0.11, kind="label")
+_ICON_LEFT = _region("icon", "Icon", 0.05, 0.16, 0.42, 0.78, kind="icon")
+_CARD_RIGHT = _region("card", "Card", 0.53, 0.16, 0.42, 0.78, kind="card")
+_CARD_LEFT = _region("card", "Card", 0.05, 0.16, 0.42, 0.78, kind="card")
+_ICON_RIGHT = _region("icon", "Icon", 0.53, 0.16, 0.42, 0.78, kind="icon")
+_FULL_CARD = _region("card", "Full card", 0.05, 0.16, 0.9, 0.78, kind="card")
+
+STATEMENT_LAYOUT_VARIANTS: list[dict[str, Any]] = [
+    {
+        "id": "statement_full_card",
+        "label": "Full card",
+        "description": "One full-width card — text, image, video, or any combination inside.",
+        "layout": "statement_full_card",
+        "regions": [_LABEL, _FULL_CARD],
+        "script_template": """### BEAT N — slug_name
+
+TYPE:       statement
+LAYOUT:     statement_full_card
+
+─── CONTENT ───
+LABEL:
+Your heading
+
+TEXT (card, black):
+First line
+Second line
+
+─── STATEMENT ───
+MODE: text_image
+IMAGE: media/photo.png
+VIDEO: media/clip.mp4
+
+HOLD: 1.2s
+""",
+    },
+    {
+        "id": "card_right_icon_left",
+        "label": "Icon + card",
+        "description": "Classic slide — icon left, white card with black text right.",
         "layout": "card_right_icon_left",
-        "visuals": ["icon_primary"],
-        "regions": [
-            _region("label", "Label", 0.05, 0.02, 0.9, 0.11, kind="label"),
-            _region("icon", "Icon", 0.05, 0.16, 0.42, 0.78, kind="icon"),
-            _region("card", "Card", 0.53, 0.16, 0.42, 0.78, kind="card"),
-        ],
-        "camera_defaults": [
-            {"hook": "after_line_2", "action": "cam_focus_right"},
-            {"hook": "after_icon", "action": "cam_focus_left"},
-            {"hook": "exit", "action": "cam_restore"},
-        ],
+        "regions": [_LABEL, _ICON_LEFT, _CARD_RIGHT],
         "script_template": """### BEAT N — slug_name
 
 TYPE:       statement
 LAYOUT:     card_right_icon_left
-CAMERA:     moving
 
 ─── CONTENT ───
 LABEL:
@@ -74,15 +97,75 @@ First line
 Second line
 
 ─── ICONS ───
-icon_primary: sparkles icon | color: WHITE
-
-─── CAMERA ───
-cam_focus_right: after_line_2
-cam_focus_left: after_icon
-cam_restore: exit
+icon_primary: brand or concept icon | color: WHITE
 
 HOLD: 1.2s
 """,
+    },
+    {
+        "id": "card_left_icon_right",
+        "label": "Card + icon",
+        "description": "White card left, icon panel right — good for variety mid-episode.",
+        "layout": "card_left_icon_right",
+        "regions": [_LABEL, _CARD_LEFT, _ICON_RIGHT],
+        "script_template": """### BEAT N — slug_name
+
+TYPE:       statement
+LAYOUT:     card_left_icon_right
+
+─── CONTENT ───
+LABEL:
+Your heading
+
+TEXT (card, black):
+First line
+Second line
+
+─── ICONS ───
+icon_primary: brand or concept icon | color: WHITE
+
+HOLD: 1.2s
+""",
+    },
+    {
+        "id": "card_right_only",
+        "label": "Card only",
+        "description": "White card on the right with no icon — text-only statement.",
+        "layout": "card_right_only",
+        "regions": [_LABEL, _CARD_RIGHT],
+        "script_template": """### BEAT N — slug_name
+
+TYPE:       statement
+LAYOUT:     card_right_only
+
+─── CONTENT ───
+LABEL:
+Your heading
+
+TEXT (card, black):
+First line
+Second line
+
+HOLD: 1.2s
+""",
+    },
+]
+
+
+BEAT_TYPES: dict[str, dict[str, Any]] = {
+    STATEMENT: {
+        "id": STATEMENT,
+        "label": "Statement",
+        "description": "Yellow label + card content. Pick a layout — full card with media, or classic icon + half card.",
+        "layout": "statement_full_card",
+        "layout_variants": STATEMENT_LAYOUT_VARIANTS,
+        "visuals": [],
+        "regions": STATEMENT_LAYOUT_VARIANTS[0]["regions"],
+        "camera_defaults": [
+            {"hook": "after_line_1", "action": "cam_focus_card"},
+            {"hook": "exit", "action": "cam_restore"},
+        ],
+        "script_template": STATEMENT_LAYOUT_VARIANTS[0]["script_template"],
     },
     QUESTION: {
         "id": QUESTION,
@@ -427,6 +510,7 @@ def list_beat_types() -> list[dict[str, Any]]:
                 "layout": spec["layout"],
                 "visuals": spec.get("visuals", []),
                 "regions": spec.get("regions", []),
+                "layout_variants": spec.get("layout_variants", []),
                 "script_template": spec.get("script_template", ""),
                 "camera_defaults": spec.get("camera_defaults", []),
             }

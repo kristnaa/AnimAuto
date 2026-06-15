@@ -104,6 +104,12 @@ CHAT_OUTPUT_SCHEMA = """Return ONLY valid JSON (no markdown fences):
         "card_width": 5.6,
         "card_height": 5.0,
         "hold": 1.5,
+        "statement": {
+          "mode": "text",
+          "text_lines": ["First line", "Second line"],
+          "image": {"ref": "media/photo.png", "kind": "project"},
+          "video": {"ref": "media/clip.mp4", "kind": "project", "loop": true}
+        },
         "visuals": {
           "primary": {"concept": "python", "role": "subject", "description": "...", "color": "WHITE"}
         },
@@ -171,9 +177,13 @@ Follow the authoring knowledge below exactly — same rules as our Cursor manim-
 {CHAT_OUTPUT_SCHEMA}
 
 ## Critical rules
-- Split narration into ~1-idea beats (~5–8s each). Use CLEAR storytelling when structure is unclear.
+- Split narration into ~1-idea beats (~8–12s each). **Target 90–150s total video** for intro episodes.
+- **Long scripts (800+ words):** create **14–18 beats**, never fewer than 10. Do NOT dump whole paragraphs into one beat.
+- **Card lines:** max **3 lines per beat**, max **~55 characters per line**. Split sentences across beats instead of one long line.
+- **hold:** use **0.9** for dense scripts, **1.2** for short relaxed beats. Never above **1.5** unless user asks.
 - **When user asks to write/run/show code, use a function, code demo, or Python snippet → type MUST be code_demo, layout code_full_card, with code_lines + code_output + code_result. Never put code in card_lines.**
-- card_right_icon_left: statements with white card on right, icon/visual on left.
+- **Statement beats:** use `layout: statement_full_card` and a `statement` object (`mode`, `text_lines`, optional `image`/`video` with `media/…` refs). No side icon.
+- card_right_icon_left: explain/recap/joke with white card on right, icon on left.
 - text_right_icon_left: questions — no card, white text on orange right half.
 - joke punchline: card_lines = setup lines; punchline_line = final line; swap visual + RED wiggle emphasis on trigger word.
 - code_demo: dark code window, run button, line-by-line highlight, then output panel. Author realistic code_output (e.g. add(2,3) → "5").
@@ -204,6 +214,7 @@ Match the same quality as our hand-authored Episode beats.
 
 ## Critical rules
 - Output script_markdown unless input is already valid JSON with a beats array.
+- **Long narration:** 14–18 beats, 3 short card lines max each (~55 chars), HOLD 0.9–1.2, target **90–150s** runtime.
 - Every beat needs TIMELINE, CONTENT, ICONS, EMPHASIS (when needed), CAMERA hooks (if moving), HOLD.
 - ICONS: describe what you want in plain English + color. Example: `icon_python: Python logo | color: #3776AB`
 - Studio uses GPT to pick Iconify icons automatically when you Generate.

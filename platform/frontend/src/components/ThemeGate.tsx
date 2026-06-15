@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Film, Loader2 } from "lucide-react";
-import { ThemeSummary, createProject, listThemes } from "../api";
+import { Film, Loader2, Mic, Palette } from "lucide-react";
+import { CreationMode, ThemeSummary, createProject, listThemes } from "../api";
 import { ThemeEditor } from "./ThemeEditor";
 import { ThemePicker } from "./ThemePicker";
 
@@ -9,7 +9,10 @@ interface ThemeGateProps {
   onBack?: () => void;
 }
 
+type GateMode = "beat_studio" | "voice_motion";
+
 export function ThemeGate({ onReady, onBack }: ThemeGateProps) {
+  const [gateMode, setGateMode] = useState<GateMode>("beat_studio");
   const [themes, setThemes] = useState<ThemeSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>("builtin_orange");
   const [projectName, setProjectName] = useState("My Animation");
@@ -35,14 +38,20 @@ export function ThemeGate({ onReady, onBack }: ThemeGateProps) {
   }, []);
 
   const handleContinue = async () => {
-    if (!selectedId) {
+    if (gateMode === "beat_studio" && !selectedId) {
       setError("Select a theme to continue");
       return;
     }
     setStarting(true);
     setError(null);
     try {
-      const project = await createProject(projectName.trim() || "My Animation", selectedId);
+      const creationMode: CreationMode = gateMode === "voice_motion" ? "voice_motion" : "beat_studio";
+      const themeId = gateMode === "voice_motion" ? "builtin_orange" : selectedId!;
+      const project = await createProject(
+        projectName.trim() || "My Animation",
+        themeId,
+        creationMode
+      );
       onReady(project.id);
     } catch (e) {
       setError(String(e));
@@ -71,22 +80,51 @@ export function ThemeGate({ onReady, onBack }: ThemeGateProps) {
             </button>
           )}
         </div>
-        <p className="theme-gate-lead">
-          Choose a visual theme for your video — background, typography, and colors. You can
-          create custom themes or use the built-in orange course look.
-        </p>
+
+        <div className="creation-mode-grid">
+          <button
+            type="button"
+            className={`creation-mode-card ${gateMode === "beat_studio" ? "active" : ""}`}
+            onClick={() => setGateMode("beat_studio")}
+          >
+            <Palette size={22} />
+            <strong>Beat studio</strong>
+            <span>Themed slides with cards, icons, and beat scripts</span>
+          </button>
+          <button
+            type="button"
+            className={`creation-mode-card ${gateMode === "voice_motion" ? "active" : ""}`}
+            onClick={() => setGateMode("voice_motion")}
+          >
+            <Mic size={22} />
+            <strong>Voice motion</strong>
+            <span>Upload narration → Manim shapes on black — no cards or icons</span>
+          </button>
+        </div>
+
+        {gateMode === "beat_studio" ? (
+          <>
+            <p className="theme-gate-lead">
+              Choose a visual theme for your video — background, typography, and colors.
+            </p>
+            <ThemePicker
+              themes={themes}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onCreate={() => {
+                setEditThemeId(null);
+                setEditorOpen(true);
+              }}
+            />
+          </>
+        ) : (
+          <p className="theme-gate-lead">
+            Black canvas, white text, colorful Manim shapes synced to your uploaded voice.
+            No theme or beat templates required.
+          </p>
+        )}
 
         {error && <div className="error-bar">{error}</div>}
-
-        <ThemePicker
-          themes={themes}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-          onCreate={() => {
-            setEditThemeId(null);
-            setEditorOpen(true);
-          }}
-        />
 
         <label className="theme-gate-name">
           <span>Project name</span>
@@ -100,7 +138,7 @@ export function ThemeGate({ onReady, onBack }: ThemeGateProps) {
         <button
           type="button"
           className="btn-primary theme-gate-continue"
-          disabled={!selectedId || starting}
+          disabled={(gateMode === "beat_studio" && !selectedId) || starting}
           onClick={handleContinue}
         >
           {starting ? <Loader2 size={18} className="spin" /> : null}

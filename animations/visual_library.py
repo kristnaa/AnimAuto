@@ -116,6 +116,53 @@ def load_iconify(ref: str, scale: float = 1.0, color: str | None = None) -> "Mob
     return _svg_mob(svg_path, scale, resolved if resolved is not None else WHITE, ref=ref)
 
 
+def _project_asset_path(scene, ref: str) -> Path:
+    if ref.startswith("assets/"):
+        return ROOT / ref
+    base = getattr(scene, "project_dir", None)
+    if base is None:
+        raise FileNotFoundError("Scene has no project_dir — cannot load project asset")
+    return Path(base) / ref
+
+
+def _is_video_path(path: Path) -> bool:
+    return path.suffix.lower() in {".mp4", ".webm", ".mov", ".m4v"}
+
+
+def load_statement_media(scene, spec: dict | None) -> "Mobject | None":
+    """Load image or video for statement card content."""
+    if not isinstance(spec, dict):
+        return None
+    ref = spec.get("ref")
+    if not ref:
+        return None
+
+    kind = spec.get("kind", "project")
+    path = _project_asset_path(scene, ref) if kind == "project" else ROOT / ref
+    if not path.is_file():
+        raise FileNotFoundError(f"Statement media not found: {path}")
+
+    if _is_video_path(path) or spec.get("media_type") == "video":
+        from manim import VideoMobject
+
+        mob = VideoMobject(str(path))
+        if spec.get("loop", True):
+
+            def _loop(m, dt: float) -> None:
+                m.video_time += dt
+                if m.duration and m.video_time >= m.duration:
+                    m.video_time = 0
+
+            mob.add_updater(_loop)
+        return mob
+
+    if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+        from manim import ImageMobject
+
+        return ImageMobject(str(path))
+    return _svg_mob(path, scale=1.0, color=None, ref=ref)
+
+
 def load_visual(scene, spec: dict) -> "Mobject":
     """Load a resolved visual spec into a Manim mobject."""
     _, _, WHITE = _manim()

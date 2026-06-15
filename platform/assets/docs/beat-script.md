@@ -19,8 +19,8 @@ NAME:        Your Episode Title
 ### BEAT 1 — short_slug
 
 TYPE:       statement
-LAYOUT:     card_right_icon_left
-ICON GRID:  auto              # optional
+LAYOUT:     statement_full_card
+ICON GRID:  auto              # optional (non-statement layouts)
 ICON REVEAL: auto              # optional
 ICON_ENTRANCE: fade_in         # optional
 CONTINUE:   yes                # optional
@@ -34,6 +34,11 @@ Your Yellow Heading
 TEXT (card, black):
 Line one
 Line two
+
+─── STATEMENT ───
+MODE: text_image
+IMAGE: media/photo.png
+VIDEO: media/clip.mp4
 
 ─── ICONS ───
 icon_primary: Python logo | color: #3776AB

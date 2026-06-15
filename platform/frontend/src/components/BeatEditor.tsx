@@ -1,13 +1,22 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Copy, Plus, Trash2 } from "lucide-react";
-import { Beat, BeatCameraStep, BeatEmphasis, BeatTypeMeta, updateProjectBeats } from "../api";
+import {
+  Beat,
+  BeatCameraStep,
+  BeatEmphasis,
+  BeatStatement,
+  BeatTypeMeta,
+  updateProjectBeats,
+} from "../api";
 import { Button } from "./Button";
 import { IconColorPopover } from "./IconColorPopover";
 import { IconPicker } from "./IconPicker";
 import { LayoutPreview } from "./LayoutPreview";
+import { StatementBeatPanel } from "./StatementBeatPanel";
 import { iconColorToHex, normalizeIconColorValue, swatchBackground } from "../iconifyUrl";
 
 const LAYOUTS = [
+  "statement_full_card",
   "card_right_icon_left",
   "card_left_icon_right",
   "text_right_icon_left",
@@ -90,9 +99,39 @@ function blankBeat(): Beat {
   return {
     label: "New beat",
     type: "statement",
-    layout: "card_right_icon_left",
-    card_lines: ["Your text here"],
+    layout: "statement_full_card",
     hold: 1.5,
+    statement: {
+      mode: "text",
+      text_lines: ["Your text here"],
+    },
+  };
+}
+
+function isStatementBeat(beat: Beat): boolean {
+  return beat.type === "statement" || beat.layout === "statement_full_card";
+}
+
+function getStatement(beat: Beat): BeatStatement {
+  const st = beat.statement || {};
+  const text_lines =
+    st.text_lines ||
+    (isStatementBeat(beat) ? beat.card_lines : undefined) ||
+    [];
+  return {
+    mode: st.mode || "text",
+    text_lines: [...text_lines],
+    image: st.image,
+    video: st.video,
+  };
+}
+
+function patchStatement(beat: Beat, statement: BeatStatement): Beat {
+  return {
+    ...beat,
+    layout: "statement_full_card",
+    statement,
+    card_lines: statement.text_lines?.length ? statement.text_lines : undefined,
   };
 }
 
@@ -123,8 +162,9 @@ function setLinesField(beat: Beat, text: string): Beat {
   return { ...beat, card_lines: lines, bg_lines: undefined };
 }
 
-function getPrimary(beat: Beat): VisualPrimary {
-  return ((beat.visuals as { primary?: VisualPrimary })?.primary || {}) as VisualPrimary;
+function getPrimary(beat: Beat | undefined): VisualPrimary {
+  if (!beat) return {};
+  return ((beat.visuals as { primary?: VisualPrimary } | undefined)?.primary || {}) as VisualPrimary;
 }
 
 function layoutForType(type: string, beatTypes: BeatTypeMeta[], current: string): string {
@@ -146,6 +186,7 @@ function tabCount(beat: Beat, tab: BeatFormTab): number | null {
 
 function beatContentText(beat: Beat): string {
   return [
+    ...(beat.statement?.text_lines || []),
     ...(beat.card_lines || []),
     ...(beat.bg_lines || []),
     ...(beat.list_lines || []),
@@ -216,34 +257,61 @@ export function BeatEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const beat = beats[selected] ?? beats[0];
-  const meta = beatTypes.find((b) => b.id === beat?.type);
+  const safeBeats = beats ?? [];
+  const beat = safeBeats[selected] ?? safeBeats[0];
+
+  useEffect(() => {
+    if (safeBeats.length === 0) return;
+    if (selected >= safeBeats.length) {
+      setSelected(safeBeats.length - 1);
+    }
+  }, [safeBeats.length, selected]);
+
+  if (!beat) {
+    return (
+      <div className="beat-editor-empty">
+        <p>No beats yet. Use Chat or Beat script to add content.</p>
+        <button type="button" className="btn-ghost sm" onClick={() => onChange([blankBeat()])}>
+          <Plus size={14} /> Add blank beat
+        </button>
+      </div>
+    );
+  }
+
+  const meta = beatTypes.find((b) => b.id === beat.type);
   const typeOptions =
     beatTypes.length > 0
       ? beatTypes.map((b) => ({ id: b.id, label: b.label || b.id }))
       : FALLBACK_TYPES.map((id) => ({ id, label: id }));
 
   const patchBeat = (patch: Partial<Beat>) => {
-    const next = beats.map((b, i) => (i === selected ? { ...b, ...patch } : b));
+    const next = safeBeats.map((b, i) => (i === selected ? { ...b, ...patch } : b));
     onChange(next);
   };
 
   const patchBeatAt = (index: number, patch: Partial<Beat>) => {
-    const next = beats.map((b, i) => (i === index ? { ...b, ...patch } : b));
+    const next = safeBeats.map((b, i) => (i === index ? { ...b, ...patch } : b));
     onChange(next);
   };
 
   const changeType = (index: number, type: string) => {
-    const b = beats[index];
-    patchBeatAt(index, {
-      type,
-      layout: layoutForType(type, beatTypes, b.layout || "card_right_icon_left"),
-    });
+    const b = safeBeats[index];
+    const layout = layoutForType(type, beatTypes, b.layout || "statement_full_card");
+    const patch: Partial<Beat> = { type, layout };
+    if (type === "statement") {
+      patch.layout = "statement_full_card";
+      patch.statement = getStatement({ ...b, type, layout: "statement_full_card" });
+      if (!patch.statement.text_lines?.length) {
+        patch.statement.text_lines = ["Your text here"];
+      }
+      patch.card_lines = patch.statement.text_lines;
+    }
+    patchBeatAt(index, patch);
   };
 
   const moveBeat = (from: number, to: number) => {
-    if (to < 0 || to >= beats.length) return;
-    const next = [...beats];
+    if (to < 0 || to >= safeBeats.length) return;
+    const next = [...safeBeats];
     const [item] = next.splice(from, 1);
     next.splice(to, 0, item);
     onChange(next);
@@ -253,15 +321,15 @@ export function BeatEditor({
   const duplicateBeat = () => {
     const copy = JSON.parse(JSON.stringify(beat)) as Beat;
     copy.label = `${copy.label} (copy)`;
-    const next = [...beats];
+    const next = [...safeBeats];
     next.splice(selected + 1, 0, copy);
     onChange(next);
     setSelected(selected + 1);
   };
 
   const deleteBeat = () => {
-    if (beats.length <= 1) return;
-    const next = beats.filter((_, i) => i !== selected);
+    if (safeBeats.length <= 1) return;
+    const next = safeBeats.filter((_, i) => i !== selected);
     onChange(next);
     setSelected(Math.max(0, selected - 1));
   };
@@ -270,7 +338,7 @@ export function BeatEditor({
     setSaving(true);
     setError(null);
     try {
-      const updated = await updateProjectBeats(projectId, beats);
+      const updated = await updateProjectBeats(projectId, safeBeats);
       onChange(updated.beats);
       onSaved?.();
     } catch (e) {
@@ -322,6 +390,7 @@ export function BeatEditor({
   };
 
   const primary = getPrimary(beat);
+  const statementBeat = isStatementBeat(beat);
 
   const formTabs: { id: BeatFormTab; label: string }[] = [
     { id: "content", label: "Content" },
@@ -329,17 +398,6 @@ export function BeatEditor({
     { id: "emphasis", label: "Emphasis" },
     { id: "camera", label: "Camera" },
   ];
-
-  if (!beat) {
-    return (
-      <div className="beat-editor-empty">
-        <p>No beats yet. Use Chat or Beat script to add content.</p>
-        <button type="button" className="btn-ghost sm" onClick={() => onChange([blankBeat()])}>
-          <Plus size={14} /> Add blank beat
-        </button>
-      </div>
-    );
-  }
 
   return (
     <div className="beat-editor">
@@ -361,7 +419,7 @@ export function BeatEditor({
             icon={<Trash2 size={15} />}
             title="Delete beat"
             aria-label="Delete beat"
-            disabled={beats.length <= 1}
+            disabled={safeBeats.length <= 1}
             onClick={deleteBeat}
           />
           <Button
@@ -370,7 +428,7 @@ export function BeatEditor({
             icon={<Plus size={15} />}
             title="Add beat"
             aria-label="Add beat"
-            onClick={() => onChange([...beats, blankBeat()])}
+            onClick={() => onChange([...safeBeats, blankBeat()])}
           />
           <Button variant="primary" size="sm" loading={saving} onClick={saveBeats}>
             Save beats
@@ -382,7 +440,7 @@ export function BeatEditor({
       <div className="beat-editor-body">
         <div className="beat-timeline-col">
           <ol className="beat-timeline">
-            {beats.map((b, i) => (
+            {safeBeats.map((b, i) => (
               <li
                 key={i}
                 className={`beat-timeline-item ${i === selected ? "active" : ""}`}
@@ -489,14 +547,26 @@ export function BeatEditor({
                   </label>
                 </div>
 
-                <label className="beat-field">
-                  <span>Text lines (one per line)</span>
-                  <textarea
-                    rows={4}
-                    value={linesField(beat)}
-                    onChange={(e) => patchBeat(setLinesField(beat, e.target.value))}
-                  />
-                </label>
+                {statementBeat ? (
+                  <div className="beat-statement-section">
+                    <h4 className="beat-section-heading">Statement card</h4>
+                    <StatementBeatPanel
+                      projectId={projectId}
+                      statement={getStatement(beat)}
+                      onChange={(statement) => patchBeat(patchStatement(beat, statement))}
+                      embedded
+                    />
+                  </div>
+                ) : (
+                  <label className="beat-field">
+                    <span>Text lines (one per line)</span>
+                    <textarea
+                      rows={4}
+                      value={linesField(beat)}
+                      onChange={(e) => patchBeat(setLinesField(beat, e.target.value))}
+                    />
+                  </label>
+                )}
 
                 {beat.type === "joke" && (
                   <label className="beat-field">

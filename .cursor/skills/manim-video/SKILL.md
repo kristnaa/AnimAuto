@@ -42,7 +42,8 @@ Web UI at `platform/` — chat/script → beats JSON → async Manim preview + 1
 - **In-app docs:** book icon in **top header** (left of project name) → opens `/docs` in a new tab
 - Beat types: `statement`, `question`, `joke`, **`code_demo`**, `list`, `compare`, `explain`, `recap`
 - Beat script format: [script-template.md](script-template.md) · `platform/assets/beat-script-template.md` · `platform/assets/docs/`
-- **Beats editor tabs:** Content, Icon (full picker + hex color + upload), Emphasis, Camera
+- **Beats editor tabs:** Content (includes statement card options), Icon, Emphasis, Camera
+- **Voice motion:** upload narration → Whisper → Manim `VoiceMotionScene` on black — see [voice-motion.md](voice-motion.md)
 - **Icon color:** `ORIGINAL` for brand/emoji logos; renderer flattens SVG gradients. Uploaded PNG/SVG stored per project.
 - **Icon entrances:** `fade_in`, `pop_in`, `slide_from_*`, `pulse`, `none`
 - **Preview progress:** percentage + phase during 420p async render

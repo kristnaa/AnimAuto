@@ -107,8 +107,11 @@ def render_scene(
     if output_mp4:
         output_mp4 = output_mp4.resolve()
         output_mp4.parent.mkdir(parents=True, exist_ok=True)
-        if output_mp4.exists():
-            output_mp4.unlink()
+        staging_mp4 = output_mp4.with_name(output_mp4.stem + ".partial.mp4")
+        if staging_mp4.exists():
+            staging_mp4.unlink()
+    else:
+        staging_mp4 = None
 
     python = _manim_python()
     cmd = [
@@ -161,7 +164,10 @@ def render_scene(
 
     mp4 = candidates[0]
     if output_mp4:
-        shutil.copy2(mp4, output_mp4)
+        target = staging_mp4 or output_mp4
+        shutil.copy2(mp4, target)
+        if staging_mp4 and staging_mp4 != output_mp4:
+            staging_mp4.replace(output_mp4)
         if progress_callback:
             progress_callback(100, "Complete")
         return output_mp4

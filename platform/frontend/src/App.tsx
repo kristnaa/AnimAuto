@@ -22,6 +22,7 @@ import {
   Project,
   Snapshot,
   ThemeSummary,
+  BeatTypeLayoutVariant,
   BeatTypeMeta,
   beatScriptTemplateDownloadUrl,
   cancelPreviewRender,
@@ -46,6 +47,7 @@ import {
   saveProjectCode,
   sendChat,
   submitScript,
+  generateVoiceStoryboard,
   validateBeats,
 } from "./api";
 import { CodeEditor } from "./CodeEditor";
@@ -54,6 +56,9 @@ import { BeatTypePicker } from "./components/BeatTypePicker";
 import { LayoutPreview } from "./components/LayoutPreview";
 import { ProjectHub } from "./components/ProjectHub";
 import { ThemeGate } from "./components/ThemeGate";
+import { VoiceMotionPanel, isVoiceMotionProject } from "./components/VoiceMotionPanel";
+import { ExcalidrawPanel, isExcalidrawProject } from "./components/ExcalidrawPanel";
+import { VoiceStoryboardPanel } from "./components/VoiceStoryboardPanel";
 import {
   clearLastProjectId,
   clearProjectUrl,
@@ -74,6 +79,13 @@ function detectScriptBeatType(script: string): string | null {
   return m?.[1]?.trim().toLowerCase().replace(/\s+/g, "_") ?? null;
 }
 
+function detectScriptBeatLayout(script: string): string | null {
+  const blocks = script.split(/^###\s*BEAT/m).slice(1);
+  const target = blocks[blocks.length - 1] ?? script;
+  const m = target.match(/^LAYOUT:\s*(.+)$/im);
+  return m?.[1]?.trim() ?? null;
+}
+
 function nextBeatNumber(script: string): number {
   const matches = script.match(/^###\s*BEAT\s*(\d+)/gim);
   if (!matches?.length) return 1;
@@ -88,6 +100,7 @@ export default function App() {
   const [script, setScript] = useState("");
   const [beatTypes, setBeatTypes] = useState<BeatTypeMeta[]>([]);
   const [selectedBeatTypeId, setSelectedBeatTypeId] = useState<string | null>(null);
+  const [pickerLayoutVariant, setPickerLayoutVariant] = useState<BeatTypeLayoutVariant | null>(null);
   const [code, setCode] = useState("");
   const [codeCustomized, setCodeCustomized] = useState(false);
   const [useAiParse, setUseAiParse] = useState(false);
@@ -117,7 +130,17 @@ export default function App() {
   const [previewPhase, setPreviewPhase] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [validationWarnings, setValidationWarnings] = useState<string | null>(null);
+  const [voiceMotionUi, setVoiceMotionUi] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  const voiceProject = isVoiceMotionProject(project);
+  const excalidrawProject = isExcalidrawProject(project);
+  const hasStoryboard = Boolean(project?.voice_motion?.director_plan?.pages?.length);
+  const canVoiceGenerate = Boolean(
+    (voiceProject || voiceMotionUi) &&
+      project?.voice_motion?.audio_ref &&
+      !hasStoryboard
+  );
 
   const syncScriptFromBeats = useCallback(async (projectId: string) => {
     try {
@@ -133,6 +156,8 @@ export default function App() {
     setProject(p);
     setStudioReady(true);
     setAppScreen("studio");
+    setVoiceMotionUi(p.creation_mode === "voice_motion");
+    setCodeCustomized(Boolean(p.code_customized));
     setLastProjectId(projectId);
     setProjectUrl(projectId);
     if (p.theme_id) {
@@ -147,11 +172,14 @@ export default function App() {
     if (p.beats?.length) {
       validateBeats(projectId)
         .then((v) => {
-          if (v.warning_count > 0) {
-            setValidationWarnings(`${v.warning_count} visual warning(s) before render`);
-          } else {
-            setValidationWarnings(null);
+          const parts: string[] = [];
+          if (v.estimated_label) {
+            parts.push(`Est. runtime ${v.estimated_label}`);
           }
+          if (v.warning_count > 0) {
+            parts.push(`${v.warning_count} warning(s)`);
+          }
+          setValidationWarnings(parts.length ? parts.join(" · ") : null);
         })
         .catch(() => setValidationWarnings(null));
     }
@@ -183,6 +211,12 @@ export default function App() {
       setBooting(false);
     }
   }, [loadStudioProject]);
+
+  useEffect(() => {
+    if (isVoiceMotionProject(project) && (mode === "script" || mode === "beats")) {
+      setMode("chat");
+    }
+  }, [project?.creation_mode, mode]);
 
   useEffect(() => {
     const detected = detectScriptBeatType(script);
@@ -319,11 +353,98 @@ export default function App() {
 
   const handleSend = async (text?: string) => {
     const msg = (text ?? input).trim();
-    if (!msg || !project || loading) return;
+    if (!project || loading) return;
+
+    const voiceMode = isVoiceMotionProject(project) || voiceMotionUi;
+    const hasAudio = Boolean(project.voice_motion?.audio_ref);
+    const hasDirectorPlan = Boolean(project.voice_motion?.director_plan?.pages?.length);
+
+    if (voiceMode && hasAudio && !hasDirectorPlan && (!msg || !msg.length)) {
+      setInput("");
+      setLoading(true);
+      setError(null);
+      setStatusMessage("Transcribing & designing storyboard…");
+      try {
+        const res = await generateVoiceStoryboard(project.id);
+        setProject(res.project);
+        setCodeCustomized(true);
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setLoading(false);
+        setStatusMessage(null);
+      }
+      return;
+    }
+
+    if (voiceMode && hasAudio && !hasDirectorPlan && msg) {
+      setInput("");
+      setLoading(true);
+      setError(null);
+      setStatusMessage("Transcribing & designing storyboard…");
+      try {
+        const res = await generateVoiceStoryboard(project.id, { message: msg });
+        setProject(res.project);
+        setCodeCustomized(true);
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setLoading(false);
+        setStatusMessage(null);
+      }
+      return;
+    }
+
+    if (voiceMode && hasDirectorPlan && !msg) {
+      return;
+    }
+
+    if (!msg) return;
     setInput("");
     setLoading(true);
     setError(null);
+
+    if (excalidrawProject) {
+      beginRenderPreview();
+      setStatusMessage("Updating Excalidraw draw order…");
+      try {
+        const res = await sendChat(project.id, msg);
+        setProject(res.project);
+        setCodeCustomized(true);
+        await loadCode(project.id, { force: true });
+        setStatusMessage("Rendering Excalidraw animation…");
+        await runPreviewRender(project.id);
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setLoading(false);
+        setRendering(false);
+        setStatusMessage(null);
+      }
+      return;
+    }
+
     beginRenderPreview();
+
+    if (voiceMode || voiceProject) {
+      setStatusMessage("Updating motion scene…");
+      try {
+        const res = await sendChat(project.id, msg);
+        setProject(res.project);
+        setCodeCustomized(true);
+        await loadCode(project.id, { force: true });
+        setStatusMessage("Rendering preview…");
+        await runPreviewRender(project.id);
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setLoading(false);
+        setRendering(false);
+        setStatusMessage(null);
+      }
+      return;
+    }
+
     setStatusMessage("Writing beats…");
     try {
       const res = await sendChat(project.id, msg);
@@ -429,18 +550,38 @@ export default function App() {
     );
   };
 
-  const handleInsertBeatTemplate = (bt: BeatTypeMeta) => {
+  const handleInsertBeatTemplate = (bt: BeatTypeMeta, variant?: BeatTypeLayoutVariant) => {
     const n = nextBeatNumber(script);
     const slug = bt.id.replace(/_/g, "_");
-    let tpl = bt.script_template.replace(/BEAT N/g, `BEAT ${n}`).replace(/slug_name/g, slug);
+    const source = variant?.script_template || bt.script_template;
+    let tpl = source.replace(/BEAT N/g, `BEAT ${n}`).replace(/slug_name/g, slug);
     const prefix = script.trim() ? "\n\n" : "";
     setScript((s) => s + prefix + tpl);
     setSelectedBeatTypeId(bt.id);
+    if (variant) setPickerLayoutVariant(variant);
   };
 
-  const previewBeatType =
+  const basePreviewBeatType =
     resolveBeatTypeMeta(detectScriptBeatType(script) ?? undefined) ??
     resolveBeatTypeMeta(selectedBeatTypeId ?? undefined);
+
+  const detectedLayout = detectScriptBeatLayout(script);
+  const layoutVariantFromScript = basePreviewBeatType?.layout_variants?.find(
+    (v) => v.id === detectedLayout || v.layout === detectedLayout,
+  );
+  const activeLayoutVariant =
+    pickerLayoutVariant ??
+    layoutVariantFromScript ??
+    basePreviewBeatType?.layout_variants?.[0];
+
+  const previewBeatType = basePreviewBeatType && activeLayoutVariant
+    ? {
+        ...basePreviewBeatType,
+        label: `${basePreviewBeatType.label} · ${activeLayoutVariant.label}`,
+        layout: activeLayoutVariant.layout,
+        regions: activeLayoutVariant.regions,
+      }
+    : basePreviewBeatType;
 
   const handleCodeFormat = async () => {
     if (!code.trim()) return;
@@ -613,7 +754,7 @@ export default function App() {
             </button>
           )}
           {project && <span className="project-name">{project.name}</span>}
-          {project && themes.length > 0 ? (
+          {project && themes.length > 0 && !voiceProject && !excalidrawProject ? (
             <label className="theme-select-wrap">
               <span className="sr-only">Theme</span>
               <select
@@ -629,6 +770,10 @@ export default function App() {
                 ))}
               </select>
             </label>
+          ) : voiceProject ? (
+            <span className="theme-badge">Voice motion</span>
+          ) : excalidrawProject ? (
+            <span className="theme-badge">Excalidraw</span>
           ) : (
             themeName && <span className="theme-badge">{themeName}</span>
           )}
@@ -689,20 +834,24 @@ export default function App() {
               <MessageSquare size={14} />
               Chat
             </button>
-            <button
-              className={`panel-tab ${mode === "script" ? "active" : ""}`}
-              onClick={() => setMode("script")}
-            >
-              <FileText size={14} />
-              Beat script
-            </button>
-            <button
-              className={`panel-tab ${mode === "beats" ? "active" : ""}`}
-              onClick={() => setMode("beats")}
-            >
-              <LayoutList size={14} />
-              Beats
-            </button>
+            {!voiceProject && (
+              <button
+                className={`panel-tab ${mode === "script" ? "active" : ""}`}
+                onClick={() => setMode("script")}
+              >
+                <FileText size={14} />
+                Beat script
+              </button>
+            )}
+            {!voiceProject && (
+              <button
+                className={`panel-tab ${mode === "beats" ? "active" : ""}`}
+                onClick={() => setMode("beats")}
+              >
+                <LayoutList size={14} />
+                Beats
+              </button>
+            )}
           </div>
 
           {mode === "chat" ? (
@@ -711,11 +860,11 @@ export default function App() {
                 {chat.length === 0 && (
                   <div className="welcome">
                     <Sparkles size={28} className="welcome-icon" />
-                    <h2>Describe your animation</h2>
+                    <h2>{voiceProject || voiceMotionUi ? "Voice motion" : "Describe your animation"}</h2>
                     <p>
-                      Describe your animation in plain English, or use the Beat script
-                      tab for structured scripts. Click the book icon in the top bar
-                      (left of the project name) to open full documentation.
+                      {voiceProject || voiceMotionUi
+                        ? "Upload narration audio below, then Send to transcribe and generate a Manim motion scene — black background, white text, colorful shapes. No cards or icons."
+                        : "Describe your animation in plain English, or use the Beat script tab for structured scripts. Click the book icon in the top bar (left of the project name) to open full documentation."}
                     </p>
                   </div>
                 )}
@@ -735,10 +884,86 @@ export default function App() {
                 <div ref={chatEndRef} />
               </div>
 
+              <ExcalidrawPanel
+                project={project}
+                onUpdated={(updatedProject, newCode) => {
+                  setProject(updatedProject);
+                  if (newCode) {
+                    setCode(newCode);
+                    setCodeCustomized(true);
+                  }
+                }}
+                onRender={async () => {
+                  beginRenderPreview();
+                  setStatusMessage("Rendering Excalidraw animation…");
+                  try {
+                    await runPreviewRender(project.id);
+                  } catch (e) {
+                    setError(String(e));
+                  } finally {
+                    setRendering(false);
+                    setStatusMessage(null);
+                  }
+                }}
+                disabled={loading}
+                rendering={rendering}
+              />
+
+              {!excalidrawProject && (
+              <VoiceMotionPanel
+                projectId={project.id}
+                voiceMotion={project.voice_motion}
+                enabled={voiceProject || voiceMotionUi}
+                onToggle={setVoiceMotionUi}
+                onUploaded={(voice) =>
+                  setProject({
+                    ...project,
+                    creation_mode: "voice_motion",
+                    voice_motion: voice,
+                    code_customized: true,
+                  })
+                }
+                disabled={loading}
+              />
+              )}
+
+              {(voiceProject || voiceMotionUi) && !excalidrawProject && (
+                <VoiceStoryboardPanel
+                  projectId={project.id}
+                  voiceMotion={project.voice_motion}
+                  onProjectUpdate={setProject}
+                  onCodeGenerated={(code) => {
+                    setCode(code);
+                    setCodeCustomized(true);
+                  }}
+                  onGenerateVideo={async () => {
+                    beginRenderPreview();
+                    setStatusMessage("Rendering preview…");
+                    try {
+                      await runPreviewRender(project.id);
+                    } catch (e) {
+                      setError(String(e));
+                    } finally {
+                      setRendering(false);
+                      setStatusMessage(null);
+                    }
+                  }}
+                  disabled={loading}
+                />
+              )}
+
               <div className="chat-input-wrap">
                 <textarea
                   className="chat-input"
-                  placeholder="Describe your animation or ask for changes…"
+                  placeholder={
+                    excalidrawProject
+                      ? "Optional draw order, e.g. hello everyone first, then python logo, then python for AI…"
+                      : voiceProject || voiceMotionUi
+                        ? hasStoryboard
+                          ? "Edit instructions for the motion scene…"
+                          : "Send to generate storyboard from audio…"
+                        : "Describe your animation or ask for changes…"
+                  }
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => {
@@ -753,7 +978,7 @@ export default function App() {
                 <button
                   className="send-btn"
                   onClick={() => handleSend()}
-                  disabled={loading || !input.trim() || !project}
+                  disabled={loading || !project || (!input.trim() && !canVoiceGenerate)}
                 >
                   {loading ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
                 </button>
@@ -765,7 +990,9 @@ export default function App() {
                 <BeatTypePicker
                   beatTypes={beatTypes}
                   selectedId={selectedBeatTypeId}
+                  detectedLayoutId={detectScriptBeatLayout(script)}
                   onSelect={(bt) => setSelectedBeatTypeId(bt.id)}
+                  onLayoutVariantChange={setPickerLayoutVariant}
                   onInsertTemplate={handleInsertBeatTemplate}
                 />
               )}
@@ -822,7 +1049,7 @@ export default function App() {
           ) : mode === "beats" ? (
             <BeatEditor
               projectId={project.id}
-              beats={project.beats}
+              beats={project.beats ?? []}
               beatTypes={beatTypes}
               pacing={project.pacing}
               onChange={(beats) => setProject({ ...project, beats })}
@@ -1013,7 +1240,7 @@ export default function App() {
                     loop
                     onError={() =>
                       setError(
-                        "Preview video failed to load. Try Render preview again."
+                        "Preview video failed to load. Wait for render to finish, then try Render preview again."
                       )
                     }
                   />

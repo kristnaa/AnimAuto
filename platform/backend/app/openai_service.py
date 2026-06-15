@@ -137,6 +137,16 @@ class OpenAIService:
 
         raise ValueError("AI response missing script_markdown or beats")
 
+    def generate_voice_motion_edit(
+        self,
+        user_message: str,
+        project: dict[str, Any],
+        scene_code: str,
+    ) -> dict[str, Any]:
+        from app.voice_motion import edit_motion_scene
+
+        return edit_motion_scene(self.client, self.model, project, user_message, scene_code)
+
     def resolve_icon_descriptions(self, requests: list[dict[str, Any]]) -> dict[str, str]:
         """Map semantic icon descriptions to Iconify prefix:name refs."""
         from app.icon_resolver import ICONIFY_REF, ICON_RESOLVE_PROMPT

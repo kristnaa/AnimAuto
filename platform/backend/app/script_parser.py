@@ -392,6 +392,27 @@ def _parse_beat_block(block: str) -> dict[str, Any]:
     if bg_m:
         beat["bg_lines"] = [_strip(l) for l in bg_m.group(1).splitlines() if _strip(l)]
 
+    stmt_m = re.search(r"─── STATEMENT ───\s*\n(.+?)(?=\n───|\nHOLD|\Z)", block, re.S | re.I)
+    if stmt_m:
+        statement: dict[str, Any] = {}
+        for line in stmt_m.group(1).splitlines():
+            line = _strip(line)
+            if not line or line.startswith("#"):
+                continue
+            if re.match(r"^MODE:\s*", line, re.I):
+                statement["mode"] = _strip(re.sub(r"^MODE:\s*", "", line, flags=re.I))
+            elif re.match(r"^IMAGE:\s*", line, re.I):
+                ref = _strip(re.sub(r"^IMAGE:\s*", "", line, flags=re.I))
+                statement["image"] = {"ref": ref, "kind": "project"}
+            elif re.match(r"^VIDEO:\s*", line, re.I):
+                ref = _strip(re.sub(r"^VIDEO:\s*", "", line, flags=re.I))
+                statement["video"] = {"ref": ref, "kind": "project", "loop": True, "muted": True}
+        if beat.get("card_lines"):
+            statement["text_lines"] = list(beat["card_lines"])
+        if statement:
+            beat["statement"] = statement
+            beat["layout"] = beat.get("layout") or "statement_full_card"
+
     icons_m = re.search(r"─── ICONS.*?───\s*\n(.+?)(?=\n───|\nHOLD|\Z)", block, re.S | re.I)
     visuals: dict[str, Any] = {}
     if icons_m:
@@ -469,7 +490,11 @@ def _parse_beat_block(block: str) -> dict[str, Any]:
             beat["layout"] = "dual_card"
         else:
             beat["layout"] = (
-                "text_right_icon_left" if beat.get("bg_lines") else "card_right_icon_left"
+                "statement_full_card"
+                if beat.get("statement") or (beat.get("type") or "").lower() == "statement"
+                else (
+                    "text_right_icon_left" if beat.get("bg_lines") else "card_right_icon_left"
+                )
             )
     if not beat.get("type"):
         if beat.get("code_lines"):

@@ -122,6 +122,7 @@ def generate_scene_code(project: dict, *, theme: dict | None = None) -> str:
     project_name = project.get("name", project_id)
     use_camera = project.get("use_camera", False)
     beats = project.get("beats", [])
+    project_pacing = project.get("pacing") or "relaxed"
 
     if not beats:
         return starter_scene_code(theme)
@@ -159,6 +160,7 @@ from beat_json import load_beat_json  # noqa: E402
 from theme_loader import normalize_theme  # noqa: E402
 
 USE_CAMERA = {use_camera}
+PROJECT_PACING = {json.dumps(project_pacing)}
 THEME = normalize_theme(json.loads({theme_open}
 {theme_payload.rstrip()}
 {theme_close}))
@@ -177,6 +179,7 @@ BEATS = [
 class GeneratedScene({scene_base}):
     def construct(self):
         self.project_dir = Path(__file__).resolve().parent
+        self.project_pacing = PROJECT_PACING
         self.set_theme(THEME)
         _apply_bg(self, THEME)
         for i, beat in enumerate(BEATS):

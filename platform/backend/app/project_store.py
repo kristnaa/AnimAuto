@@ -45,6 +45,7 @@ class ProjectStore:
                         "created_at": meta.get("created_at"),
                         "beat_count": len(meta.get("beats", [])),
                         "theme_id": meta.get("theme_id", "builtin_orange"),
+                        "creation_mode": meta.get("creation_mode", "beat_studio"),
                         "has_preview": preview.exists(),
                     }
                 )
@@ -56,15 +57,23 @@ class ProjectStore:
             raise FileNotFoundError(f"Project not found: {project_id}")
         shutil.rmtree(pdir)
 
-    def create_project(self, name: str = "Untitled", *, theme_id: str = "builtin_orange") -> dict:
+    def create_project(
+        self,
+        name: str = "Untitled",
+        *,
+        theme_id: str = "builtin_orange",
+        creation_mode: str = "beat_studio",
+    ) -> dict:
         project_id = str(uuid.uuid4())[:8]
         pdir = self._project_dir(project_id)
         pdir.mkdir(parents=True)
         (pdir / "history").mkdir()
         (pdir / "renders").mkdir()
-        project = {
+        (pdir / "media").mkdir(exist_ok=True)
+        project: dict[str, Any] = {
             "id": project_id,
             "name": name,
+            "creation_mode": creation_mode,
             "theme_id": theme_id,
             "style_pack": "course_clean",
             "use_camera": False,
@@ -73,6 +82,12 @@ class ProjectStore:
             "created_at": _now_iso(),
             "updated_at": _now_iso(),
         }
+        if creation_mode == "voice_motion":
+            project["code_customized"] = True
+            project["voice_motion"] = None
+        if creation_mode == "excalidraw":
+            project["code_customized"] = True
+            project["excalidraw"] = None
         self.save_project(project, snapshot=False)
         return project
 
@@ -83,6 +98,8 @@ class ProjectStore:
         project = json.loads(path.read_text())
         if not project.get("theme_id"):
             project["theme_id"] = "builtin_orange"
+        if not project.get("creation_mode"):
+            project["creation_mode"] = "beat_studio"
         return project
 
     def save_project(self, project: dict, *, snapshot: bool = True) -> dict:
