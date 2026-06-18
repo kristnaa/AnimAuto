@@ -335,6 +335,42 @@ body {
   min-height: 0;
 }
 
+.sidebar-resizer {
+  flex-shrink: 0;
+  width: 6px;
+  margin: 0 -1px;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  z-index: 3;
+  touch-action: none;
+}
+
+.sidebar-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  background: var(--border);
+  transition: background 0.15s;
+}
+
+.sidebar-resizer:hover::after,
+body.sidebar-resizing .sidebar-resizer::after {
+  background: color-mix(in srgb, var(--accent) 70%, var(--border));
+}
+
+body.sidebar-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.sidebar-resizing iframe {
+  pointer-events: none;
+}
+
 /* Chat panel */
 /* Panel tabs */
 .panel-tabs {
@@ -716,7 +752,6 @@ body {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
   background: var(--surface);
   min-height: 0;
   min-width: 0;
@@ -2898,6 +2933,353 @@ body {
 
 .error-bar.compact {
   margin: 8px 12px;
+}
+
+.excal-sequence-panel {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--surface);
+}
+
+.excal-sequence-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.excal-sequence-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.excal-sequence-subtitle {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.excal-sequence-subtitle .inline-grip {
+  vertical-align: -2px;
+}
+
+.excal-sequence-page-select {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.excal-sequence-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(220px, 0.85fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.excal-sequence-body-list-only {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.excal-sequence-preview-canvas {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.excal-sequence-preview-stage.canvas {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  max-height: none;
+  border: none;
+  border-radius: 12px;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+}
+
+.excal-sequence-preview-stage.canvas .excal-sequence-preview-image {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.excal-sequence-preview-footer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 4px 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.preview-stage-page {
+  padding: 16px;
+  align-items: stretch;
+}
+
+.excal-sequence-preview {
+  min-width: 0;
+}
+
+.excal-sequence-preview-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.excal-sequence-preview-hint {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.excal-sequence-preview-stage {
+  position: relative;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: auto;
+  background: #fff;
+  max-height: min(52vh, 420px);
+}
+
+.excal-sequence-preview-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.excal-sequence-preview-overlay {
+  position: absolute;
+  inset: 0;
+}
+
+.excal-sequence-hit {
+  position: absolute;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.excal-sequence-hit:hover,
+.excal-sequence-hit.hovered {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.excal-sequence-hit.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.excal-sequence-hit-step {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.excal-sequence-list-wrap {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.excal-sequence-list-label {
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.excal-sequence-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: min(52vh, 420px);
+  overflow-y: auto;
+}
+
+.excal-sequence-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  cursor: grab;
+}
+
+.excal-sequence-item.drop-target {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.excal-sequence-item.dragging {
+  opacity: 0.55;
+}
+
+.excal-sequence-item.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+}
+
+.excal-sequence-item.hovered:not(.selected) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.excal-sequence-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.excal-sequence-grip {
+  color: var(--muted);
+  display: inline-flex;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: grab;
+}
+
+.excal-sequence-grip:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.excal-sequence-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+  flex-shrink: 0;
+}
+
+.excal-sequence-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.excal-sequence-kind {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.excal-sequence-kind.kind-image {
+  background: color-mix(in srgb, #40c057 14%, transparent);
+  color: #40c057;
+}
+
+.excal-sequence-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.excal-sequence-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.excal-sequence-actions {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.excal-sequence-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.excal-sequence-empty {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+@media (max-width: 900px) {
+  .excal-sequence-body {
+    grid-template-columns: 1fr;
+  }
+
+  .excal-sequence-list {
+    max-height: 240px;
+  }
+}
+
+.btn-ghost.xs {
+  padding: 2px 4px;
+  min-width: 0;
 }
 
 .btn-icon {

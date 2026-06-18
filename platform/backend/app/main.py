@@ -35,7 +35,15 @@ from app.voice_director import run_storyboard_pipeline
 from app.voice_layouts import LAYOUT_IDS, normalize_page
 from app.voice_motion import run_director_codegen, run_voice_pipeline, starter_voice_motion_scene  # noqa: E402
 from app.excalidraw_codegen import compile_excalidraw_scene, SCENE_CLASS as EXCALIDRAW_SCENE_CLASS, starter_excalidraw_scene  # noqa: E402
-from app.excalidraw_parser import parse_animation_sequence_phrases  # noqa: E402
+from app.excalidraw_parser import (  # noqa: E402
+    animation_unit_elements,
+    build_page_svg,
+    convert_svg_text_to_paths,
+    describe_drawing_animation_units,
+    detect_svg_pages,
+    parse_animation_sequence_phrases,
+    resolve_page_unit_order,
+)
 
 from app.theme_schema import ThemeCreateBody, ThemeUpdateBody  # noqa: E402
 from app.theme_store import BUILTIN_ORANGE_ID, ThemeStore  # noqa: E402
@@ -123,17 +131,20 @@ def _compile_excalidraw_project(
     total_run_time: float = 7.0,
     hold_time: float = 1.25,
     animation_sequence: list[str] | None = None,
+    page_sequences: dict[int, list[int]] | None = None,
 ) -> str:
     excal = dict(project.get("excalidraw") or {})
     drawing_path = _excalidraw_path(project_id, excal.get("drawing_ref"))
     if not drawing_path:
         raise HTTPException(status_code=400, detail="Upload an Excalidraw .svg or .excalidraw file first.")
     seq = animation_sequence if animation_sequence is not None else excal.get("animation_sequence")
+    page_seq = page_sequences if page_sequences is not None else _page_sequences_from_excal(excal)
     code = compile_excalidraw_scene(
         drawing_path,
         total_run_time=total_run_time,
         hold_time=hold_time,
         animation_sequence=seq or None,
+        page_sequences=page_seq or None,
     )
     store.write_scene(project_id, code)
     project["creation_mode"] = "excalidraw"
@@ -406,6 +417,33 @@ class ExcalidrawGenerateRequest(BaseModel):
     hold_time: float = 1.25
     animation_sequence: list[str] | None = None
     animation_note: str | None = None
+    page_sequences: dict[str, list[int]] | None = None
+
+
+class ExcalidrawSequenceRequest(BaseModel):
+    page_index: int = 0
+    unit_order: list[int]
+
+
+def _normalize_page_sequences(raw: dict | None) -> dict[int, list[int]]:
+    if not raw:
+        return {}
+    out: dict[int, list[int]] = {}
+    for key, value in raw.items():
+        if not isinstance(value, list):
+            continue
+        try:
+            page_index = int(key)
+        except (TypeError, ValueError):
+            continue
+        order = [int(v) for v in value if isinstance(v, (int, float, str)) and str(v).isdigit()]
+        if order:
+            out[page_index] = order
+    return out
+
+
+def _page_sequences_from_excal(excal: dict) -> dict[int, list[int]]:
+    return _normalize_page_sequences(excal.get("page_sequences"))
 
 
 class VoiceGenerateRequest(BaseModel):
@@ -947,6 +985,103 @@ def get_excalidraw(project_id: str):
     }
 
 
+@app.get("/api/projects/{project_id}/excalidraw/units")
+def get_excalidraw_units(project_id: str):
+    try:
+        project = store.load_project(project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    excal = dict(project.get("excalidraw") or {})
+    drawing_path = _excalidraw_path(project_id, excal.get("drawing_ref"))
+    if not drawing_path:
+        raise HTTPException(status_code=400, detail="Upload a drawing first.")
+
+    pages = describe_drawing_animation_units(drawing_path)
+    saved = _page_sequences_from_excal(excal)
+    global_seq = excal.get("animation_sequence") or []
+    detected_pages = detect_svg_pages(drawing_path) if drawing_path.suffix.lower() == ".svg" else []
+
+    for page in pages:
+        page_index = int(page["page_index"])
+        unit_count = len(page.get("units") or [])
+        saved_order = saved.get(page_index)
+        if saved_order is None:
+            if detected_pages and page_index < len(detected_pages):
+                page_svg = build_page_svg(drawing_path, detected_pages[page_index], detected_pages)
+            else:
+                page_svg = drawing_path
+            saved_order = resolve_page_unit_order(
+                page_index,
+                unit_count,
+                page_sequences=saved,
+                animation_sequence=global_seq,
+                page_svg=convert_svg_text_to_paths(page_svg),
+            )
+        page["saved_order"] = saved_order
+
+    return {"pages": pages, "page_sequences": saved}
+
+
+@app.get("/api/projects/{project_id}/excalidraw/pages/{page_index}/preview")
+def get_excalidraw_page_preview(project_id: str, page_index: int):
+    try:
+        project = store.load_project(project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    excal = dict(project.get("excalidraw") or {})
+    drawing_path = _excalidraw_path(project_id, excal.get("drawing_ref"))
+    if not drawing_path:
+        raise HTTPException(status_code=400, detail="Upload a drawing first.")
+
+    if drawing_path.suffix.lower() != ".svg":
+        raise HTTPException(status_code=400, detail="Page preview requires an SVG drawing.")
+
+    detected_pages = detect_svg_pages(drawing_path)
+    if detected_pages:
+        if page_index < 0 or page_index >= len(detected_pages):
+            raise HTTPException(status_code=404, detail="Page not found.")
+        page_svg = build_page_svg(drawing_path, detected_pages[page_index], detected_pages)
+    elif page_index == 0:
+        page_svg = drawing_path
+    else:
+        raise HTTPException(status_code=404, detail="Page not found.")
+
+    preview_svg = convert_svg_text_to_paths(page_svg)
+    return FileResponse(preview_svg, media_type="image/svg+xml")
+
+
+@app.put("/api/projects/{project_id}/excalidraw/sequence")
+def save_excalidraw_sequence(project_id: str, body: ExcalidrawSequenceRequest):
+    try:
+        project = store.load_project(project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    excal = dict(project.get("excalidraw") or {})
+    if not excal.get("drawing_ref"):
+        raise HTTPException(status_code=400, detail="Upload a drawing first.")
+
+    page_sequences = _page_sequences_from_excal(excal)
+    page_sequences[int(body.page_index)] = [int(v) for v in body.unit_order]
+    excal["page_sequences"] = {str(k): v for k, v in page_sequences.items()}
+    project["excalidraw"] = excal
+    try:
+        code = _compile_excalidraw_project(
+            project_id,
+            project,
+            page_sequences=page_sequences,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Compile error: {exc}") from exc
+    project["code_customized"] = True
+    store.save_project(project, snapshot=True)
+    return {"page_sequences": excal["page_sequences"], "project": project, "code": code}
+
+
 @app.post("/api/projects/{project_id}/excalidraw/generate")
 def generate_excalidraw_animation(project_id: str, body: ExcalidrawGenerateRequest | None = None):
     try:
@@ -962,6 +1097,8 @@ def generate_excalidraw_animation(project_id: str, body: ExcalidrawGenerateReque
         excal["animation_sequence"] = body.animation_sequence
     elif body.animation_note:
         excal["animation_sequence"] = parse_animation_sequence_phrases(body.animation_note)
+    if body.page_sequences is not None:
+        excal["page_sequences"] = body.page_sequences
     project["excalidraw"] = excal
 
     try:
@@ -971,6 +1108,7 @@ def generate_excalidraw_animation(project_id: str, body: ExcalidrawGenerateReque
             total_run_time=body.total_run_time,
             hold_time=body.hold_time,
             animation_sequence=excal.get("animation_sequence"),
+            page_sequences=_page_sequences_from_excal(excal),
         )
     except HTTPException:
         raise
@@ -1273,6 +1411,7 @@ def chat(project_id: str, body: ChatRequest):
                 project_id,
                 project,
                 animation_sequence=excal.get("animation_sequence"),
+                page_sequences=_page_sequences_from_excal(excal),
             )
         except HTTPException:
             raise

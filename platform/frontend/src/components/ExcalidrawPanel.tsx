@@ -1,12 +1,15 @@
 import { useRef, useState } from "react";
 import { Loader2, PenLine, Paperclip, Play } from "lucide-react";
-import type { Project } from "../api";
+import type { ExcalidrawDrawOrderPreviewBridge, Project } from "../api";
 import { generateExcalidrawAnimation, uploadExcalidrawDrawing } from "../api";
+import { ExcalidrawSequenceEditor } from "./ExcalidrawSequenceEditor";
 
 interface ExcalidrawPanelProps {
   project: Project;
   onUpdated: (project: Project, code?: string) => void;
   onRender: () => void;
+  onPreviewBridgeChange?: (bridge: ExcalidrawDrawOrderPreviewBridge | null) => void;
+  onFocusPagePreview?: () => void;
   disabled?: boolean;
   rendering?: boolean;
 }
@@ -15,6 +18,8 @@ export function ExcalidrawPanel({
   project,
   onUpdated,
   onRender,
+  onPreviewBridgeChange,
+  onFocusPagePreview,
   disabled,
   rendering,
 }: ExcalidrawPanelProps) {
@@ -47,13 +52,37 @@ export function ExcalidrawPanel({
     setGenerating(true);
     setError(null);
     try {
-      const res = await generateExcalidrawAnimation(project.id);
+      const res = await generateExcalidrawAnimation(project.id, {
+        page_sequences: excalidraw?.page_sequences,
+      });
       onUpdated(res.project, res.code);
     } catch (e) {
       setError(String(e));
     } finally {
       setGenerating(false);
     }
+  };
+
+  const handleSequenceSaved = (
+    pageSequences: Record<string, number[]>,
+    updated?: Project,
+    code?: string
+  ) => {
+    if (updated) {
+      onUpdated(updated, code);
+      return;
+    }
+    onUpdated(
+      {
+        ...project,
+        excalidraw: {
+          ...excalidraw,
+          page_sequences: pageSequences,
+        },
+        code_customized: true,
+      },
+      code
+    );
   };
 
   return (
@@ -106,11 +135,19 @@ export function ExcalidrawPanel({
           {rendering ? <Loader2 size={14} className="spin" /> : "Render"}
         </button>
       </div>
+
+      <ExcalidrawSequenceEditor
+        projectId={project.id}
+        drawingRef={excalidraw?.drawing_ref}
+        disabled={disabled || uploading || generating}
+        onSaved={handleSequenceSaved}
+        onPreviewBridgeChange={onPreviewBridgeChange}
+        onFocusPagePreview={onFocusPagePreview}
+      />
+
       <p className="voiceover-hint">
-        Draw in <strong>Excalidraw</strong>, export as <strong>.svg</strong> (or save{" "}
-        <strong>.excalidraw</strong>), upload here, then <strong>Generate animation</strong> and{" "}
-        <strong>Render</strong>. Multiple frames/pages animate one full screen at a time. Use chat for
-        draw order within each page.
+        Draw in <strong>Excalidraw</strong>, export as <strong>.svg</strong>, upload, set draw order
+        above, then <strong>Generate animation</strong> and <strong>Render</strong>.
       </p>
       {error && <div className="error-bar compact">{error}</div>}
     </div>

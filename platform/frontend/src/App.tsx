@@ -7,6 +7,7 @@ import {
   FileText,
   Film,
   FolderOpen,
+  Image as ImageIcon,
   LayoutList,
   Loader2,
   MessageSquare,
@@ -49,6 +50,7 @@ import {
   submitScript,
   generateVoiceStoryboard,
   validateBeats,
+  type ExcalidrawDrawOrderPreviewBridge,
 } from "./api";
 import { CodeEditor } from "./CodeEditor";
 import { BeatEditor } from "./components/BeatEditor";
@@ -58,6 +60,27 @@ import { ProjectHub } from "./components/ProjectHub";
 import { ThemeGate } from "./components/ThemeGate";
 import { VoiceMotionPanel, isVoiceMotionProject } from "./components/VoiceMotionPanel";
 import { ExcalidrawPanel, isExcalidrawProject } from "./components/ExcalidrawPanel";
+import { ExcalidrawPagePreview } from "./components/ExcalidrawPagePreview";
+
+const SIDEBAR_WIDTH_KEY = "manimations-studio-sidebar-width";
+const DEFAULT_SIDEBAR_WIDTH = 420;
+const MIN_SIDEBAR_WIDTH = 280;
+const MAX_SIDEBAR_WIDTH = 760;
+
+function readSidebarWidth(): number {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+    if (raw) {
+      const value = Number(raw);
+      if (Number.isFinite(value)) {
+        return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, value));
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_SIDEBAR_WIDTH;
+}
 import { VoiceStoryboardPanel } from "./components/VoiceStoryboardPanel";
 import {
   clearLastProjectId,
@@ -69,7 +92,7 @@ import {
 } from "./projectStorage";
 
 type PanelMode = "chat" | "script" | "beats";
-type PreviewView = "video" | "code";
+type PreviewView = "video" | "code" | "page";
 type AppScreen = "hub" | "create" | "studio";
 
 function detectScriptBeatType(script: string): string | null {
@@ -131,10 +154,26 @@ export default function App() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [validationWarnings, setValidationWarnings] = useState<string | null>(null);
   const [voiceMotionUi, setVoiceMotionUi] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
+  const [drawOrderBridge, setDrawOrderBridge] = useState<ExcalidrawDrawOrderPreviewBridge | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const voiceProject = isVoiceMotionProject(project);
   const excalidrawProject = isExcalidrawProject(project);
+  const handleDrawOrderBridgeChange = useCallback((bridge: ExcalidrawDrawOrderPreviewBridge | null) => {
+    setDrawOrderBridge(bridge);
+  }, []);
+  const focusDrawOrderPagePreview = useCallback(() => {
+    setPreviewView("page");
+  }, []);
+
+  useEffect(() => {
+    if (!excalidrawProject) {
+      setDrawOrderBridge(null);
+      setPreviewView((current) => (current === "page" ? "video" : current));
+    }
+  }, [excalidrawProject, project?.id]);
+
   const hasStoryboard = Boolean(project?.voice_motion?.director_plan?.pages?.length);
   const canVoiceGenerate = Boolean(
     (voiceProject || voiceMotionUi) &&
@@ -184,6 +223,38 @@ export default function App() {
         .catch(() => setValidationWarnings(null));
     }
   }, [syncScriptFromBeats]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
+    } catch {
+      /* ignore */
+    }
+  }, [sidebarWidth]);
+
+  const beginSidebarResize = (event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+
+    const onMove = (moveEvent: MouseEvent) => {
+      const next = Math.min(
+        MAX_SIDEBAR_WIDTH,
+        Math.max(MIN_SIDEBAR_WIDTH, startWidth + (moveEvent.clientX - startX))
+      );
+      setSidebarWidth(next);
+    };
+
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.classList.remove("sidebar-resizing");
+    };
+
+    document.body.classList.add("sidebar-resizing");
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
 
   useEffect(() => {
     health()
@@ -824,7 +895,10 @@ export default function App() {
         </div>
       </header>
 
-      <div className="main">
+      <div
+        className="main"
+        style={{ "--chat-width": `${sidebarWidth}px` } as React.CSSProperties}
+      >
         <aside className="chat-panel">
           <div className="panel-tabs">
             <button
@@ -893,6 +967,8 @@ export default function App() {
                     setCodeCustomized(true);
                   }
                 }}
+                onPreviewBridgeChange={handleDrawOrderBridgeChange}
+                onFocusPagePreview={focusDrawOrderPagePreview}
                 onRender={async () => {
                   beginRenderPreview();
                   setStatusMessage("Rendering Excalidraw animation…");
@@ -1064,6 +1140,17 @@ export default function App() {
           {error && <div className="error-bar">{error}</div>}
         </aside>
 
+        <div
+          className="sidebar-resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          aria-valuemin={MIN_SIDEBAR_WIDTH}
+          aria-valuemax={MAX_SIDEBAR_WIDTH}
+          aria-valuenow={sidebarWidth}
+          onMouseDown={beginSidebarResize}
+        />
+
         <section className="preview-panel">
           <div className="preview-toolbar">
             <div className="preview-view-toggle">
@@ -1075,6 +1162,17 @@ export default function App() {
               >
                 <Film size={14} />
               </button>
+              {excalidrawProject && (
+                <button
+                  type="button"
+                  className={`preview-view-btn ${previewView === "page" ? "active" : ""}`}
+                  onClick={() => setPreviewView("page")}
+                  title="Page canvas for draw-order selection"
+                  disabled={!drawOrderBridge}
+                >
+                  <ImageIcon size={14} />
+                </button>
+              )}
               <button
                 type="button"
                 className={`preview-view-btn ${previewView === "code" ? "active" : ""}`}
@@ -1085,7 +1183,7 @@ export default function App() {
               </button>
             </div>
             <span className="preview-label">
-              {previewView === "video" ? "Preview" : "Scene code"}
+              {previewView === "video" ? "Preview" : previewView === "page" ? "Page canvas" : "Scene code"}
             </span>
             {project && previewView === "video" && (
               <span className="beat-count">{project.beats.length} beat(s)</span>
@@ -1286,6 +1384,28 @@ export default function App() {
                 </div>
               )}
             </>
+          ) : previewView === "page" ? (
+            <div className="preview-stage preview-stage-page">
+              {drawOrderBridge && project ? (
+                <ExcalidrawPagePreview
+                  projectId={project.id}
+                  page={drawOrderBridge.page}
+                  orderedUnits={drawOrderBridge.orderedUnits}
+                  selectedUnitIndex={drawOrderBridge.selectedUnitIndex}
+                  hoveredUnitIndex={drawOrderBridge.hoveredUnitIndex}
+                  onSelectUnit={drawOrderBridge.selectUnit}
+                  onHoverUnit={drawOrderBridge.hoverUnit}
+                  disabled={loading || rendering}
+                  variant="canvas"
+                  cacheKey={project.excalidraw?.drawing_ref ?? project.id}
+                />
+              ) : (
+                <div className="preview-empty">
+                  <ImageIcon size={48} strokeWidth={1} />
+                  <p>Upload a drawing and open draw order to inspect elements here</p>
+                </div>
+              )}
+            </div>
           ) : (
             <div className="preview-code-wrap">
               <p className="preview-code-hint">

@@ -150,12 +150,40 @@ export interface VoiceMotionData {
   storyboard_warnings?: string[];
 }
 
+export interface ExcalidrawUnitBBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface ExcalidrawAnimationUnit {
+  index: number;
+  label: string;
+  kind: "image" | "text" | "shape" | string;
+  unit_id: string;
+  hint?: string;
+  color?: string | null;
+  bbox?: ExcalidrawUnitBBox | [number, number, number, number] | null;
+}
+
+export interface ExcalidrawPageUnits {
+  page_index: number;
+  page_name: string;
+  page_id: string;
+  page_width?: number;
+  page_height?: number;
+  units: ExcalidrawAnimationUnit[];
+  saved_order: number[];
+}
+
 export interface ExcalidrawData {
   drawing_ref?: string;
   drawing_filename?: string;
   format?: string;
   animation_note?: string;
   animation_sequence?: string[];
+  page_sequences?: Record<string, number[]>;
 }
 
 export type CreationMode = "beat_studio" | "voice_motion" | "excalidraw";
@@ -893,7 +921,7 @@ export async function uploadExcalidrawDrawing(projectId: string, file: File) {
 
 export async function generateExcalidrawAnimation(
   projectId: string,
-  options?: { total_run_time?: number; hold_time?: number }
+  options?: { total_run_time?: number; hold_time?: number; page_sequences?: Record<string, number[]> }
 ) {
   return json<{
     message: string;
@@ -906,11 +934,48 @@ export async function generateExcalidrawAnimation(
     body: JSON.stringify({
       total_run_time: options?.total_run_time ?? 7,
       hold_time: options?.hold_time ?? 1.25,
+      page_sequences: options?.page_sequences,
     }),
   });
+}
+
+export async function fetchExcalidrawUnits(projectId: string) {
+  return json<{
+    pages: ExcalidrawPageUnits[];
+    page_sequences: Record<string, number[]>;
+  }>(`${API}/projects/${projectId}/excalidraw/units`);
+}
+
+export async function saveExcalidrawSequence(
+  projectId: string,
+  pageIndex: number,
+  unitOrder: number[]
+) {
+  return json<{ page_sequences: Record<string, number[]>; project: Project; code: string }>(
+    `${API}/projects/${projectId}/excalidraw/sequence`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ page_index: pageIndex, unit_order: unitOrder }),
+    }
+  );
 }
 
 export function projectMediaUrl(projectId: string, ref: string) {
   const name = ref.replace(/^media\//, "");
   return `${API}/projects/${projectId}/media/${encodeURIComponent(name)}`;
+}
+
+export function excalidrawPagePreviewUrl(projectId: string, pageIndex: number, cacheBust?: string | number) {
+  const q = cacheBust != null ? `?v=${encodeURIComponent(String(cacheBust))}` : "";
+  return `${API}/projects/${projectId}/excalidraw/pages/${pageIndex}/preview${q}`;
+}
+
+export interface ExcalidrawDrawOrderPreviewBridge {
+  page: ExcalidrawPageUnits;
+  orderedUnits: ExcalidrawAnimationUnit[];
+  selectedUnitIndex: number | null;
+  hoveredUnitIndex: number | null;
+  selectUnit: (unitIndex: number) => void;
+  hoverUnit: (unitIndex: number | null) => void;
 }
