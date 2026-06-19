@@ -269,6 +269,13 @@ def _play_text_typing_layer(scene: Scene, layer: Mobject, *, run_time: float) ->
     return True
 
 
+def _set_hidden_for_reveal(mob: Mobject) -> None:
+    if isinstance(mob, ImageMobject):
+        mob.set_fill_opacity(0)
+    else:
+        mob.set_opacity(0)
+
+
 def _play_animation_layer(
     scene: Scene,
     layer: Mobject,
@@ -281,8 +288,10 @@ def _play_animation_layer(
             return
     if _is_embedded_icon(layer) or _is_icon_wrapper(layer):
         reveal = layer.submobjects[0] if _is_icon_wrapper(layer) else layer
-        reveal.set_opacity(0)
+        _set_hidden_for_reveal(reveal)
         layer.set_z_index(10)
+        if layer not in scene.mobjects:
+            scene.add(layer)
         scene.play(
             FadeIn(reveal, scale=1.02),
             run_time=max(run_time, _ICON_REVEAL_TIME),
@@ -797,7 +806,7 @@ def _attach_raster_icons(
 
         img.excal_placement = placement
         img.excal_unit_index = placement.unit_index
-        img.set_opacity(0)
+        img.set_fill_opacity(0)
 
         _stretch_mobject_to_rect(
             img,
