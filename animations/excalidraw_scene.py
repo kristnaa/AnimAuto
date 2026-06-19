@@ -29,6 +29,7 @@ from excalidraw_parser import (
     detect_svg_pages,
     extract_svg_raster_placements,
     _is_excalidraw_frame_title,
+    _is_text_animation_unit,
     pages_from_excalidraw_file,
     parse_view_box,
     prepare_svg_for_manim,
@@ -40,6 +41,7 @@ from excalidraw_parser import (
 
 # Excalidraw Y-down → Manim Y-up
 _EXCAL_SCALE = 0.012
+_ICON_REVEAL_TIME = 1.0
 
 
 def _is_embedded_icon(mob: Mobject) -> bool:
@@ -225,6 +227,48 @@ def animate_excalidraw_file(
     _play_draw_layers(scene, group, total_run_time=total_run_time, hold_time=hold_time, fade_out=fade_out)
 
 
+def _sort_text_glyphs(mobs: list[VMobject]) -> list[VMobject]:
+    """Reading order: top-to-bottom, then left-to-right."""
+    return sorted(mobs, key=lambda m: (-round(float(m.get_center()[1]), 1), float(m.get_center()[0])))
+
+
+def _glyph_reveal_animation(glyph: VMobject) -> Animation:
+    if float(glyph.get_fill_opacity() or 0) > 0.05:
+        return Write(glyph)
+    _ensure_visible_stroke(glyph)
+    return Create(glyph)
+
+
+def _play_text_typing_layer(scene: Scene, layer: Mobject, *, run_time: float) -> bool:
+    """Reveal converted Excalidraw text glyph-by-glyph."""
+    layer.set_z_index(1)
+    if isinstance(layer, VGroup):
+        glyphs = [
+            sm
+            for sm in layer.submobjects
+            if isinstance(sm, VMobject) and sm.get_num_points() > 0
+        ]
+    elif isinstance(layer, VMobject) and layer.get_num_points() > 0:
+        glyphs = [layer]
+    else:
+        return False
+
+    if not glyphs:
+        return False
+
+    if len(glyphs) == 1:
+        scene.play(_glyph_reveal_animation(glyphs[0]), run_time=run_time)
+        return True
+
+    glyphs = _sort_text_glyphs(glyphs)
+    lag = min(0.15, 0.85 / max(len(glyphs), 1))
+    scene.play(
+        LaggedStart(*[_glyph_reveal_animation(g) for g in glyphs], lag_ratio=lag),
+        run_time=max(run_time, len(glyphs) * 0.035),
+    )
+    return True
+
+
 def _play_animation_layer(
     scene: Scene,
     layer: Mobject,
@@ -232,14 +276,17 @@ def _play_animation_layer(
     run_time: float,
     svg_root: Mobject | None = None,
 ) -> None:
+    if getattr(layer, "excal_is_text_unit", False):
+        if _play_text_typing_layer(scene, layer, run_time=run_time):
+            return
     if _is_embedded_icon(layer) or _is_icon_wrapper(layer):
-        icon = layer.submobjects[0] if _is_icon_wrapper(layer) else layer
-        icon.set_opacity(1)
-        layer.set_opacity(1)
-        # Above sketch strokes (z=1); labels sit to the right and rarely overlap icons.
+        reveal = layer.submobjects[0] if _is_icon_wrapper(layer) else layer
+        reveal.set_opacity(0)
         layer.set_z_index(10)
-        if layer not in scene.mobjects:
-            scene.add(layer)
+        scene.play(
+            FadeIn(reveal, scale=1.02),
+            run_time=max(run_time, _ICON_REVEAL_TIME),
+        )
         return
     elif isinstance(layer, VMobject) and layer.get_num_points() > 0:
         layer.set_z_index(1)
@@ -296,8 +343,7 @@ def _play_draw_layers(
     _add_panel_backgrounds(scene, group)
     layers = _animation_layers(group)
     svg_root = _svg_vector_root(group)
-    animated = [layer for layer in layers if not _is_embedded_icon(layer) and not _is_icon_wrapper(layer)]
-    n = max(len(animated), 1)
+    n = max(len(layers), 1)
     per = max(0.08, (total_run_time - hold_time) / n)
 
     for layer in layers:
@@ -343,8 +389,7 @@ def _animate_svg_pages(
         _add_panel_backgrounds(scene, group)
         layers = _animation_layers(group)
         svg_root = _svg_vector_root(group)
-        animated = [layer for layer in layers if not _is_embedded_icon(layer) and not _is_icon_wrapper(layer)]
-        layer_count = max(len(animated), 1)
+        layer_count = max(len(layers), 1)
         per = max(0.08, draw_budget / layer_count)
         for layer in layers:
             _play_animation_layer(scene, layer, run_time=per, svg_root=svg_root)
@@ -1122,7 +1167,10 @@ def _animation_layers(group: Mobject) -> list[Mobject]:
                     continue
                 start, end = stroke_ranges[unit_index]
                 if start < end:
-                    layers.append(_unit_stroke_layer(all_strokes[start:end]))
+                    layer = _unit_stroke_layer(all_strokes[start:end])
+                    if _is_text_animation_unit(units[unit_index]):
+                        layer.excal_is_text_unit = True
+                    layers.append(layer)
 
             if offset < len(all_strokes):
                 tail = all_strokes[offset:]
@@ -1204,7 +1252,7 @@ def _is_background_fill(mob: Mobject, root: Mobject | None = None) -> bool:
 
 
 def _is_frame_outline(mob: Mobject, root: Mobject | None = None) -> bool:
-    """Skip hollow full-frame rectangles (Excalidraw slide borders)."""
+    """Skip hollow full-bleed slide frames, not inset content borders."""
     if not isinstance(mob, VMobject):
         return False
     if float(mob.get_fill_opacity() or 0) > 0.08:
@@ -1213,7 +1261,13 @@ def _is_frame_outline(mob: Mobject, root: Mobject | None = None) -> bool:
         return False
     if root is None or root.width < 0.01 or root.height < 0.01:
         return False
-    return mob.width >= root.width * 0.88 and mob.height >= root.height * 0.88
+    if mob.width < root.width * 0.88 or mob.height < root.height * 0.88:
+        return False
+    inset_x = abs(float(mob.get_left()[0] - root.get_left()[0]))
+    inset_y = abs(float(mob.get_top()[1] - root.get_top()[1]))
+    if inset_x > root.width * 0.02 or inset_y > root.height * 0.02:
+        return False
+    return True
 
 
 def _fill_rgb(mob: VMobject) -> tuple[float, float, float] | None:

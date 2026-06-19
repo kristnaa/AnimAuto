@@ -485,8 +485,30 @@ def _parse_svg_length(value: str, *, ref: float) -> float | None:
         return None
 
 
-def _is_excalidraw_frame_outline_rect(elem: ET.Element, vb_w: float, vb_h: float) -> bool:
-    """Excalidraw slide frames export as a full-size stroked rect (fill none)."""
+def _rect_page_origin(
+    elem: ET.Element,
+    parent_map: dict[ET.Element, ET.Element],
+) -> tuple[float, float]:
+    """Top-left corner of a rect in page coordinates."""
+    tx, ty = _parse_translate(elem.get("transform") or "")
+    left = _float_attr(elem, "x") + tx
+    top = _float_attr(elem, "y") + ty
+    cur = parent_map.get(elem)
+    while cur is not None:
+        ptx, pty = _parse_translate(cur.get("transform") or "")
+        left, top = _apply_svg_transform(left, top, cur.get("transform") or "")
+        cur = parent_map.get(cur)
+    return left, top
+
+
+def _is_excalidraw_frame_outline_rect(
+    elem: ET.Element,
+    vb_w: float,
+    vb_h: float,
+    *,
+    parent_map: dict[ET.Element, ET.Element] | None = None,
+) -> bool:
+    """Remove only full-bleed Excalidraw slide frames, not inset content borders."""
     if _local_tag(elem) != "rect":
         return False
     stroke = (elem.get("stroke") or "").strip().lower()
@@ -499,7 +521,87 @@ def _is_excalidraw_frame_outline_rect(elem: ET.Element, vb_w: float, vb_h: float
     height = _parse_svg_length(str(elem.get("height") or ""), ref=vb_h)
     if width is None or height is None:
         return False
-    return width >= vb_w * 0.85 and height >= vb_h * 0.85
+    if width < vb_w * 0.85 or height < vb_h * 0.85:
+        return False
+    if parent_map is not None:
+        left, top = _rect_page_origin(elem, parent_map)
+    else:
+        tx, ty = _parse_translate(elem.get("transform") or "")
+        left = _float_attr(elem, "x") + tx
+        top = _float_attr(elem, "y") + ty
+    inset_limit = min(vb_w, vb_h) * 0.02
+    if left > inset_limit or top > inset_limit:
+        return False
+    return True
+
+
+def _svg_has_content_border(root: ET.Element, vb_w: float, vb_h: float) -> bool:
+    """True when the SVG already includes a large hollow stroked slide border."""
+    for elem in root.iter():
+        if _local_tag(elem) != "rect":
+            continue
+        stroke = (elem.get("stroke") or "").strip().lower()
+        if not stroke or stroke in ("none", "transparent"):
+            continue
+        fill = (elem.get("fill") or "").strip().lower()
+        if fill not in ("", "none", "transparent"):
+            continue
+        width = _parse_svg_length(str(elem.get("width") or ""), ref=vb_w)
+        height = _parse_svg_length(str(elem.get("height") or ""), ref=vb_h)
+        if width is None or height is None:
+            continue
+        if width >= vb_w * 0.65 and height >= vb_h * 0.65:
+            return True
+    return False
+
+
+def ensure_excalidraw_slide_border(svg_path: Path) -> Path:
+    """Restore the rounded slide stroke missing from single-frame Excalidraw exports."""
+    try:
+        root = ET.parse(svg_path).getroot()
+    except ET.ParseError:
+        return svg_path
+
+    vb_x, vb_y, vb_w, vb_h = parse_view_box(root)
+    if _svg_has_content_border(root, vb_w, vb_h):
+        return svg_path
+
+    inset_x = max(8.0, min(12.0, vb_w * 0.014))
+    inset_top = max(8.0, min(30.5, vb_h * 0.063))
+    inset_bottom = max(8.0, min(12.0, vb_h * 0.021))
+    border_w = vb_w - 2 * inset_x
+    border_h = vb_h - inset_top - inset_bottom
+    if border_w <= 0 or border_h <= 0:
+        return svg_path
+
+    svg_ns = "http://www.w3.org/2000/svg"
+    border = ET.Element(f"{{{svg_ns}}}g")
+    border.set("stroke-linecap", "round")
+    border.set(
+        "transform",
+        f"translate({vb_x + inset_x} {vb_y + inset_top}) rotate(0 {border_w / 2} {border_h / 2})",
+    )
+    rect = ET.SubElement(border, f"{{{svg_ns}}}rect")
+    rect.set("width", f"{border_w}px")
+    rect.set("height", f"{border_h}px")
+    rect.set("stroke", "#bbb")
+    rect.set("fill", "none")
+    rect.set("rx", "8")
+
+    insert_at = 0
+    for i, child in enumerate(list(root)):
+        if _local_tag(child) == "defs":
+            insert_at = i + 1
+        elif _local_tag(child) == "rect" and (child.get("fill") or "").lower() not in (
+            "none",
+            "transparent",
+            "",
+        ):
+            insert_at = i + 1
+            break
+    root.insert(insert_at, border)
+
+    return _write_reordered_svg(svg_path, root, "border")
 
 
 def strip_excalidraw_frame_outlines(svg_path: Path) -> Path:
@@ -514,7 +616,7 @@ def strip_excalidraw_frame_outlines(svg_path: Path) -> Path:
     removed = False
 
     for elem in list(root.iter()):
-        if not _is_excalidraw_frame_outline_rect(elem, vb_w, vb_h):
+        if not _is_excalidraw_frame_outline_rect(elem, vb_w, vb_h, parent_map=parent_map):
             continue
         in_defs = False
         cur: ET.Element | None = elem
@@ -646,16 +748,21 @@ def _is_excalidraw_frame_title(
     view_box: tuple[float, float, float, float] | None = None,
 ) -> bool:
     """True for Excalidraw's automatic frame name label (editor metadata, not scene content)."""
-    if label.strip().lower() != "frame":
+    if not _element_text_label(unit):
         return False
-    if _element_text_label(unit):
-        return True
     center = _element_bbox_center(unit, parent_map)
-    if center is None or view_box is None:
-        return True
+    if center is None:
+        return label.strip().lower() == "frame"
     cx, cy = center
-    vb_x, vb_y, vb_w, vb_h = view_box
-    return cx <= vb_x + vb_w * 0.12 and cy <= vb_y + vb_h * 0.12
+    vb_x, vb_y, vb_w, vb_h = view_box or (0.0, 0.0, 800.0, 600.0)
+    margin_x = min(48.0, vb_w * 0.12)
+    margin_y = min(48.0, vb_h * 0.12)
+    return cx <= vb_x + margin_x and cy <= vb_y + margin_y
+
+
+def _is_text_animation_unit(unit: ET.Element) -> bool:
+    """True for Excalidraw text units (including SVG text converted to glyph paths)."""
+    return _element_unit_kind(unit) == "text"
 
 
 def _element_unit_colors(elem: ET.Element) -> tuple[str | None, str | None]:
@@ -1299,6 +1406,38 @@ def strip_embedded_image_uses(svg_path: Path) -> Path:
     return out
 
 
+def _path_data_valid(d: str | None) -> bool:
+    return bool(d and len(d.strip()) >= 2)
+
+
+def strip_invalid_svg_paths(svg_path: Path) -> Path:
+    """Remove <path> nodes without a ``d`` attribute (crashes Manim's SVG parser)."""
+    try:
+        root = ET.parse(svg_path).getroot()
+    except ET.ParseError:
+        return svg_path
+
+    parent_map: dict[ET.Element, ET.Element] = {
+        child: parent for parent in root.iter() for child in parent
+    }
+    removed = False
+    for elem in list(root.iter()):
+        if _local_tag(elem) != "path":
+            continue
+        if _path_data_valid(elem.get("d")):
+            continue
+        parent = parent_map.get(elem)
+        if parent is None:
+            continue
+        parent.remove(elem)
+        removed = True
+
+    if not removed:
+        return svg_path
+
+    return _write_reordered_svg(svg_path, root, "sanitized")
+
+
 def prepare_svg_for_manim(
     svg_path: Path,
     animation_sequence: list[str] | None = None,
@@ -1306,11 +1445,14 @@ def prepare_svg_for_manim(
 ) -> Path:
     """Return an SVG ready for SVGMobject: text as paths, optional draw-order."""
     converted = convert_svg_text_to_paths(svg_path)
+    converted = strip_invalid_svg_paths(converted)
     # Per-page unit_order is applied at animation time only; reordering the SVG DOM
     # here shifts raster placement and breaks icon alignment in cells.
     if animation_sequence and not unit_order:
         converted = reorder_svg_by_sequence(converted, animation_sequence)
-    return strip_excalidraw_frame_outlines(converted)
+    converted = ensure_excalidraw_slide_border(converted)
+    converted = strip_excalidraw_frame_outlines(converted)
+    return strip_invalid_svg_paths(converted)
 
 
 @dataclass(frozen=True)
