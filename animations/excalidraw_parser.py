@@ -1466,6 +1466,7 @@ class SvgImagePlacement:
     height: float
     order: int
     unit_index: int = 0
+    rotation: float = 0.0
 
 
 def _elem_href(elem: ET.Element) -> str:
@@ -1503,31 +1504,148 @@ def _cache_embedded_image(
     return dest
 
 
+_AFFINE_IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+
+
+def _mul_affine(
+    left: tuple[float, float, float, float, float, float],
+    right: tuple[float, float, float, float, float, float],
+) -> tuple[float, float, float, float, float, float]:
+    a1, b1, c1, d1, e1, f1 = left
+    a2, b2, c2, d2, e2, f2 = right
+    return (
+        a1 * a2 + c1 * b2,
+        b1 * a2 + d1 * b2,
+        a1 * c2 + c1 * d2,
+        b1 * c2 + d1 * d2,
+        a1 * e2 + c1 * f2 + e1,
+        b1 * e2 + d1 * f2 + f1,
+    )
+
+
+def _translate_affine(tx: float, ty: float) -> tuple[float, float, float, float, float, float]:
+    return (1.0, 0.0, 0.0, 1.0, tx, ty)
+
+
+def _rotate_affine(
+    angle_deg: float,
+    cx: float = 0.0,
+    cy: float = 0.0,
+) -> tuple[float, float, float, float, float, float]:
+    rad = math.radians(angle_deg)
+    cos_a, sin_a = math.cos(rad), math.sin(rad)
+    rotation = (cos_a, sin_a, -sin_a, cos_a, 0.0, 0.0)
+    if abs(cx) < 1e-12 and abs(cy) < 1e-12:
+        return rotation
+    return _mul_affine(
+        _translate_affine(cx, cy),
+        _mul_affine(rotation, _translate_affine(-cx, -cy)),
+    )
+
+
+def _scale_affine(
+    sx: float,
+    sy: float,
+    cx: float = 0.0,
+    cy: float = 0.0,
+) -> tuple[float, float, float, float, float, float]:
+    scaling = (sx, 0.0, 0.0, sy, 0.0, 0.0)
+    if abs(cx) < 1e-12 and abs(cy) < 1e-12:
+        return scaling
+    return _mul_affine(
+        _translate_affine(cx, cy),
+        _mul_affine(scaling, _translate_affine(-cx, -cy)),
+    )
+
+
+def _affine_from_svg_transform(transform: str) -> tuple[float, float, float, float, float, float]:
+    """Parse one SVG transform attribute into a 2D affine matrix."""
+    if not transform.strip():
+        return _AFFINE_IDENTITY
+
+    ops: list[tuple[int, str, re.Match[str]]] = []
+    patterns: list[tuple[str, str]] = [
+        (r"translate\(\s*([-\d.eE+]+)(?:[\s,]+([-\d.eE+]+))?\s*\)", "translate"),
+        (r"scale\(\s*([-\d.eE+]+)(?:[\s,]+([-\d.eE+]+))?\s*\)", "scale"),
+        (
+            r"rotate\(\s*([-\d.eE+]+)(?:[\s,]+([-\d.eE+]+))(?:[\s,]+([-\d.eE+]+))?\s*\)",
+            "rotate",
+        ),
+        (
+            r"matrix\(\s*([-\d.eE+]+)[\s,]+([-\d.eE+]+)[\s,]+([-\d.eE+]+)[\s,]+([-\d.eE+]+)[\s,]+([-\d.eE+]+)[\s,]+([-\d.eE+]+)\s*\)",
+            "matrix",
+        ),
+    ]
+    for pattern, kind in patterns:
+        for match in re.finditer(pattern, transform):
+            ops.append((match.start(), kind, match))
+    ops.sort(key=lambda item: item[0])
+
+    matrix = _AFFINE_IDENTITY
+    for _, kind, match in ops:
+        if kind == "translate":
+            matrix = _mul_affine(
+                matrix,
+                _translate_affine(float(match.group(1)), float(match.group(2) or 0)),
+            )
+        elif kind == "scale":
+            sx = float(match.group(1))
+            sy = float(match.group(2) or sx)
+            matrix = _mul_affine(matrix, _scale_affine(sx, sy))
+        elif kind == "rotate":
+            matrix = _mul_affine(
+                matrix,
+                _rotate_affine(
+                    float(match.group(1)),
+                    float(match.group(2) or 0),
+                    float(match.group(3) or 0),
+                ),
+            )
+        else:
+            matrix = _mul_affine(
+                matrix,
+                tuple(float(match.group(i)) for i in range(1, 7)),  # type: ignore[arg-type]
+            )
+    return matrix
+
+
+def _apply_affine(
+    x: float,
+    y: float,
+    matrix: tuple[float, float, float, float, float, float],
+) -> tuple[float, float]:
+    a, b, c, d, e, f = matrix
+    return a * x + c * y + e, b * x + d * y + f
+
+
+def _affine_angle_deg(matrix: tuple[float, float, float, float, float, float]) -> float:
+    a, b, _, _, _, _ = matrix
+    return math.degrees(math.atan2(b, a))
+
+
 def _apply_svg_transform(x: float, y: float, transform: str) -> tuple[float, float]:
-    for match in re.finditer(r"translate\(\s*([-\d.eE+]+)(?:[\s,]+([-\d.eE+]+))?\s*\)", transform):
-        x += float(match.group(1))
-        y += float(match.group(2) or 0)
-    for match in re.finditer(
-        r"rotate\(\s*([-\d.eE+]+)(?:[\s,]+([-\d.eE+]+))(?:[\s,]+([-\d.eE+]+))?\s*\)",
-        transform,
-    ):
-        angle = float(match.group(1))
-        if abs(angle) < 1e-6:
-            continue
-        cx = float(match.group(2) or 0)
-        cy = float(match.group(3) or 0)
-        rad = math.radians(angle)
-        dx, dy = x - cx, y - cy
-        cos_a, sin_a = math.cos(rad), math.sin(rad)
-        x = cx + dx * cos_a - dy * sin_a
-        y = cy + dx * sin_a + dy * cos_a
-    return x, y
+    return _apply_affine(x, y, _affine_from_svg_transform(transform))
 
 
-def _placement_from_use(
+def _elem_page_affine(
     elem: ET.Element,
     parent_map: dict[ET.Element, ET.Element],
-) -> tuple[float, float, float, float]:
+) -> tuple[float, float, float, float, float, float]:
+    """Accumulate ancestor transforms from one SVG element up to the root <svg>."""
+    matrix = _AFFINE_IDENTITY
+    cur = parent_map.get(elem)
+    while cur is not None and _local_tag(cur) != "svg":
+        transform = cur.get("transform")
+        if transform:
+            matrix = _mul_affine(_affine_from_svg_transform(transform), matrix)
+        cur = parent_map.get(cur)
+    return matrix
+
+
+def _placement_affine_from_elem(
+    elem: ET.Element,
+    parent_map: dict[ET.Element, ET.Element],
+) -> tuple[float, float, float, float, float]:
     try:
         width = float(str(elem.get("width") or "0").replace("%", ""))
         height = float(str(elem.get("height") or "0").replace("%", ""))
@@ -1539,15 +1657,16 @@ def _placement_from_use(
     except ValueError:
         x, y = 0.0, 0.0
 
-    transforms: list[str] = []
-    cur = parent_map.get(elem)
-    while cur is not None and _local_tag(cur) != "svg":
-        t = cur.get("transform")
-        if t:
-            transforms.append(t)
-        cur = parent_map.get(cur)
-    for t in reversed(transforms):
-        x, y = _apply_svg_transform(x, y, t)
+    matrix = _elem_page_affine(elem, parent_map)
+    x, y = _apply_affine(x, y, matrix)
+    return x, y, width, height, _affine_angle_deg(matrix)
+
+
+def _placement_from_use(
+    elem: ET.Element,
+    parent_map: dict[ET.Element, ET.Element],
+) -> tuple[float, float, float, float]:
+    x, y, width, height, _rotation = _placement_affine_from_elem(elem, parent_map)
     return x, y, width, height
 
 
@@ -1591,14 +1710,14 @@ def extract_svg_raster_placements(svg_path: Path) -> list[SvgImagePlacement]:
             uri = _symbol_image_uri(root, href) or ""
             if not uri:
                 continue
-            x, y, width, height = _placement_from_use(elem, parent_map)
+            x, y, width, height, rotation = _placement_affine_from_elem(elem, parent_map)
         elif tag == "image":
             if any(_local_tag(anc) == "defs" for anc in _parent_chain(elem, parent_map)):
                 continue
             uri = _elem_href(elem)
             if not uri.startswith("data:image"):
                 continue
-            x, y, width, height = _placement_from_use(elem, parent_map)
+            x, y, width, height, rotation = _placement_affine_from_elem(elem, parent_map)
         else:
             continue
 
@@ -1618,6 +1737,7 @@ def extract_svg_raster_placements(svg_path: Path) -> list[SvgImagePlacement]:
                 height=height,
                 order=order,
                 unit_index=_element_unit_index(elem, units, parent_map),
+                rotation=rotation,
             )
         )
         order += 1

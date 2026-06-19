@@ -14,7 +14,8 @@ import numpy as np
 from excalidraw_parser import (
     ExcalidrawPage,
     SvgImagePlacement,
-    _apply_svg_transform,
+    _apply_affine,
+    _elem_page_affine,
     _element_bbox_center,
     _element_has_raster_image,
     _element_path_weight,
@@ -130,6 +131,7 @@ def _trim_icon_placement(
         height=placement.height * (by1 - by0) / image_h,
         order=placement.order,
         unit_index=placement.unit_index,
+        rotation=placement.rotation,
     )
 
 
@@ -484,18 +486,99 @@ def _fit_to_frame(group: Mobject, margin: float = 0.9) -> None:
 
 
 def _fit_svg_group(group: Group, margin: float = 0.9) -> None:
-    """Fit vectors and icons together so they share one scale transform."""
-    if _svg_has_drawable_vectors(_svg_vector_root(group)):
+    """Lay out every Excalidraw export in SVG viewBox space (one code path for all scenes)."""
+    _layout_excalidraw_group(group, margin)
+
+
+def _viewbox_layout_metrics(
+    vb: tuple[float, float, float, float],
+    margin: float,
+) -> tuple[np.ndarray, float, float, float, float, float, float, float, float]:
+    """Map the SVG viewBox onto the Manim frame."""
+    vb_x, vb_y, vb_w, vb_h = vb
+    page_w, page_h = _viewbox_page_size(vb_w, vb_h, margin)
+    page_origin = UP * (page_h / 2) + LEFT * (page_w / 2)
+    scale_x = page_w / vb_w if vb_w > 0 else 1.0
+    scale_y = page_h / vb_h if vb_h > 0 else 1.0
+    return page_origin, page_w, page_h, scale_x, scale_y, vb_x, vb_y, vb_w, vb_h
+
+
+def _viewbox_top_left(
+    x: float,
+    y: float,
+    page_origin: np.ndarray,
+    scale_x: float,
+    scale_y: float,
+    vb_x: float,
+    vb_y: float,
+) -> np.ndarray:
+    """Map one SVG page coordinate to Manim space using viewBox metrics."""
+    return page_origin + RIGHT * ((x - vb_x) * scale_x) + DOWN * ((y - vb_y) * scale_y)
+
+
+def _layout_excalidraw_group(group: Group, margin: float = 0.9) -> None:
+    """Single layout path: vectors and raster icons share the SVG viewBox grid."""
+    vb = getattr(group, "excal_view_box", None)
+    if vb is None:
         _fit_to_frame(group, margin)
+        return
+
+    (
+        page_origin,
+        page_w,
+        _page_h,
+        scale_x,
+        scale_y,
+        vb_x,
+        vb_y,
+        _vb_w,
+        _vb_h,
+    ) = _viewbox_layout_metrics(vb, margin)
+
+    svg = _svg_vector_root(group)
+    if svg is not None and svg.width > 0.001:
+        svg.scale(page_w / svg.width)
+        svg.move_to(page_origin, aligned_edge=UL)
+
+    for img in (sm for sm in group.get_family() if _is_embedded_icon(sm)):
+        placement = getattr(img, "excal_placement", None)
+        if placement is None:
+            continue
+        _stretch_mobject_to_rect(
+            img,
+            placement.width * scale_x,
+            placement.height * scale_y,
+        )
+        top_left = _viewbox_top_left(
+            placement.x,
+            placement.y,
+            page_origin,
+            scale_x,
+            scale_y,
+            vb_x,
+            vb_y,
+        )
+        _place_raster_icon(img, top_left, placement.rotation)
+
+    if _group_has_manim_text(group):
         _align_raster_icons_to_manim_text(group)
-        return
 
-    images = [sm for sm in group.get_family() if _is_embedded_icon(sm)]
-    if images:
-        _position_raster_images_viewbox(group, images, margin)
-        return
 
-    _fit_to_frame(group, margin)
+def _group_has_manim_text(group: Group) -> bool:
+    """True when the SVG contains vector text that icons should align to."""
+    render_path = getattr(group, "excal_render_path", None)
+    vb = getattr(group, "excal_view_box", None)
+    svg = _svg_vector_root(group)
+    if render_path is None or vb is None or svg is None:
+        return False
+    try:
+        root = ET.parse(render_path).getroot()
+    except ET.ParseError:
+        return False
+    path_map = _svg_path_manim_map(group, root)
+    if not path_map:
+        return False
+    return bool(_text_label_ink_bounds(root, path_map))
 
 
 def _local_tag(elem: ET.Element) -> str:
@@ -515,20 +598,11 @@ def _svg_path_page_points(
     if len(nums) < 2:
         return []
 
-    transforms: list[str] = []
-    cur = parent_map.get(elem)
-    while cur is not None and _local_tag(cur) != "svg":
-        transform = cur.get("transform")
-        if transform:
-            transforms.append(transform)
-        cur = parent_map.get(cur)
+    matrix = _elem_page_affine(elem, parent_map)
 
     points: list[tuple[float, float]] = []
     for index in range(0, len(nums) - 1, 2):
-        x, y = nums[index], nums[index + 1]
-        for transform in reversed(transforms):
-            x, y = _apply_svg_transform(x, y, transform)
-        points.append((x, y))
+        points.append(_apply_affine(nums[index], nums[index + 1], matrix))
     return points
 
 
@@ -781,17 +855,24 @@ def _align_raster_icons_to_manim_text(group: Group) -> None:
             submob.shift(UP * shift_y)
 
 
+def _place_raster_icon(img: Mobject, top_left: np.ndarray, rotation_deg: float = 0.0) -> None:
+    """Place a raster icon at a viewBox-mapped top-left, preserving SVG rotation."""
+    img.move_to(top_left, aligned_edge=UL)
+    if abs(rotation_deg) > 1e-3:
+        img.rotate(-rotation_deg * DEGREES, about_point=top_left)
+
+
 def _attach_raster_icons(
     svg: Mobject,
     render_path: Path,
     vb: tuple[float, float, float, float],
 ) -> list[Mobject]:
-    """Build icon layers at flat SVG page coordinates (viewBox scaled)."""
+    """Load embedded raster images; layout happens in _layout_excalidraw_group."""
     placements = extract_svg_raster_placements(render_path)
     if not placements:
         return []
 
-    vb_x, vb_y, vb_w, vb_h = vb
+    _, _, vb_w, vb_h = vb
     if vb_w <= 0 or vb_h <= 0:
         return []
 
@@ -807,25 +888,8 @@ def _attach_raster_icons(
         img.excal_placement = placement
         img.excal_unit_index = placement.unit_index
         img.set_fill_opacity(0)
-
-        _stretch_mobject_to_rect(
-            img,
-            placement.width / vb_w * svg.width,
-            placement.height / vb_h * svg.height,
-        )
-        top_left = _viewbox_point_to_manim(svg, placement.x, placement.y, vb_x, vb_y, vb_w, vb_h)
-        img.move_to(top_left, aligned_edge=UL)
         attached.append(Group(img))
     return attached
-
-
-def _svg_has_drawable_vectors(svg: Mobject | None) -> bool:
-    if svg is None:
-        return False
-    for mob in svg.get_family():
-        if isinstance(mob, VMobject) and mob.get_num_points() > 0:
-            return True
-    return False
 
 
 def _viewbox_page_size(vb_w: float, vb_h: float, margin: float) -> tuple[float, float]:
@@ -839,76 +903,12 @@ def _viewbox_page_size(vb_w: float, vb_h: float, margin: float) -> tuple[float, 
     return fh * vb_w / vb_h, fh
 
 
-def _viewbox_scales(
-    vb_w: float,
-    vb_h: float,
-    *,
-    width: float,
-    height: float,
-) -> tuple[float, float]:
-    if vb_w <= 0 or vb_h <= 0:
-        return 1.0, 1.0
-    return width / vb_w, height / vb_h
-
-
-def _viewbox_point_to_manim(
-    svg: Mobject,
-    x: float,
-    y: float,
-    vb_x: float,
-    vb_y: float,
-    vb_w: float,
-    vb_h: float,
-) -> np.ndarray:
-    """Map one SVG viewBox point onto a fitted SVGMobject."""
-    nx = (x - vb_x) / vb_w
-    ny = (y - vb_y) / vb_h
-    origin = svg.get_corner(UL)
-    return origin + RIGHT * (nx * svg.width) + DOWN * (ny * svg.height)
-
-
 def _stretch_mobject_to_rect(img: Mobject, target_w: float, target_h: float) -> None:
     """Match an icon to the exact SVG placement width/height after viewBox scaling."""
     if target_w <= 0 or target_h <= 0:
         return
     img.stretch_to_fit_width(max(target_w, 0.01))
     img.stretch_to_fit_height(max(target_h, 0.01))
-
-
-def _position_raster_images_viewbox(
-    group: Group,
-    images: list[Mobject],
-    margin: float,
-) -> None:
-    """Place raster images on image-only pages using the SVG viewBox."""
-    vb = getattr(group, "excal_view_box", None)
-    if vb is None:
-        render_path = getattr(group, "excal_render_path", None)
-        if render_path is not None:
-            try:
-                vb = parse_view_box(ET.parse(render_path).getroot())
-                group.excal_view_box = vb
-            except ET.ParseError:
-                vb = None
-    if vb is None:
-        vb = (0.0, 0.0, 800.0, 450.0)
-    vb_x, vb_y, vb_w, vb_h = vb
-    page_w, page_h = _viewbox_page_size(vb_w, vb_h, margin)
-    scale_x, scale_y = _viewbox_scales(vb_w, vb_h, width=page_w, height=page_h)
-    page_origin = UP * (page_h / 2) + LEFT * (page_w / 2)
-    for img in images:
-        placement = getattr(img, "excal_placement", None)
-        if placement is None:
-            continue
-        _stretch_mobject_to_rect(
-            img,
-            placement.width * scale_x,
-            placement.height * scale_y,
-        )
-        nx = (placement.x - vb_x) / vb_w
-        ny = (placement.y - vb_y) / vb_h
-        top_left = page_origin + RIGHT * (nx * page_w) + DOWN * (ny * page_h)
-        img.move_to(top_left, aligned_edge=UL)
 
 
 def _collect_embedded_icons(group: Mobject) -> dict[int, Mobject]:
